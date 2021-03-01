@@ -320,6 +320,10 @@ namespace Microsoft.Coyote.SystematicTesting
             {
                 this.Strategy = new DFSStrategy(configuration.MaxUnfairSchedulingSteps);
             }
+            else if (configuration.SchedulingStrategy is "rl")
+            {
+                this.Strategy = new QLearningStrategy(configuration.AbstractionLevel, configuration.MaxUnfairSchedulingSteps, this.RandomValueGenerator);
+            }
             else if (configuration.SchedulingStrategy is "portfolio")
             {
                 var msg = "Portfolio testing strategy is only " +
@@ -446,7 +450,8 @@ namespace Microsoft.Coyote.SystematicTesting
             if (this.Configuration.SchedulingStrategy is "random" ||
                 this.Configuration.SchedulingStrategy is "pct" ||
                 this.Configuration.SchedulingStrategy is "fairpct" ||
-                this.Configuration.SchedulingStrategy is "probabilistic")
+                this.Configuration.SchedulingStrategy is "probabilistic" ||
+                this.Configuration.SchedulingStrategy is "rl")
             {
                 options = $" (seed:{this.RandomValueGenerator.Seed})";
             }

@@ -138,16 +138,17 @@ namespace Microsoft.Coyote.SystematicTesting
         /// <remarks>
         /// An enabled operation is one that is not blocked nor completed.
         /// </remarks>
-        internal void Yield() => this.ScheduleNextOperation(true);
+        internal void Yield() => this.ScheduleNextOperation(AsyncOperationType.Default, true);
 
         /// <summary>
         /// Schedules the next enabled operation, which can include the currently executing operation.
         /// </summary>
+        /// <param name="type">Type of the operation.</param>
         /// <param name="isYielding">True if the current operation is yielding, else false.</param>
         /// <remarks>
         /// An enabled operation is one that is not blocked nor completed.
         /// </remarks>
-        internal void ScheduleNextOperation(bool isYielding = false)
+        internal void ScheduleNextOperation(AsyncOperationType type = AsyncOperationType.Default, bool isYielding = false)
         {
             lock (this.SyncObject)
             {
@@ -174,10 +175,16 @@ namespace Microsoft.Coyote.SystematicTesting
                 // Checks if the scheduling steps bound has been reached.
                 this.CheckIfSchedulingStepsBoundIsReached();
 
+                current.SetType(type);
                 if (this.Configuration.IsProgramStateHashingEnabled)
                 {
                     // Update the current operation with the hashed program state.
                     current.HashedProgramState = this.Runtime.GetHashedProgramState();
+
+                    current.DefaultHashedState = this.Runtime.GetProgramState("default");
+                    current.InboxOnlyHashedState = this.Runtime.GetProgramState("inboxonly");
+                    current.CustomHashedState = this.Runtime.GetProgramState("custom");
+                    current.CustomOnlyHashedState = this.Runtime.GetProgramState("custom-only");
                 }
 
                 // Choose the next operation to schedule, if there is one enabled.

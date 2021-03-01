@@ -30,6 +30,17 @@ namespace Microsoft.Coyote.Tasks
         internal bool IsLockTaken;
 
         /// <summary>
+        /// Set contains all created SBs.
+        /// </summary>
+        public static HashSet<SynchronizedBlock> SynchronizedBlocks = new HashSet<SynchronizedBlock>();
+
+        /// <summary>
+        /// User-defined hashed state of the SBs. Override to improve the
+        /// accuracy of stateful techniques during testing.
+        /// </summary>
+        protected virtual int HashedState => 0;
+
+        /// <summary>
         /// Initializes a new instance of the <see cref="SynchronizedBlock"/> class.
         /// </summary>
         /// <param name="syncObject">The sync object to serialize access to.</param>
@@ -118,6 +129,38 @@ namespace Microsoft.Coyote.Tasks
         }
 
         /// <summary>
+        /// Returns the hashed state of this SB.
+        /// </summary>
+        internal virtual int GetHashedState(string abstractionLevel)
+        {
+            unchecked
+            {
+                var hash = 19;
+
+                if (abstractionLevel is "default")
+                {
+                    hash = (hash * 31) + this.GetType().GetHashCode();
+                    // hash = (hash * 31) + this.CurrentState.GetHashCode();
+                }
+                else if (abstractionLevel is "custom")
+                {
+                    hash = (hash * 31) + this.GetType().GetHashCode();
+                    // hash = (hash * 31) + this.CurrentState.GetHashCode();
+
+                    // Adds the user-defined hashed state.
+                    hash = (hash * 31) + this.HashedState;
+                }
+                else if (abstractionLevel is "custom-only")
+                {
+                    // Adds the user-defined hashed state.
+                    hash = (hash * 31) + this.HashedState;
+                }
+
+                return hash;
+            }
+        }
+
+        /// <summary>
         /// Mock implementation of <see cref="SynchronizedBlock"/> that can be controlled during systematic testing.
         /// </summary>
         internal class Mock : SynchronizedBlock
@@ -184,6 +227,7 @@ namespace Microsoft.Coyote.Tasks
                 this.PulseQueue = new Queue<PulseOperation>();
                 this.LockCountMap = new Dictionary<AsyncOperation, int>();
                 this.UseCount = 0;
+                SynchronizedBlocks.Add(this);
             }
 
             /// <summary>
@@ -226,7 +270,7 @@ namespace Microsoft.Coyote.Tasks
                 {
                     // If this operation is trying to acquire this lock while it is free, then inject a scheduling
                     // point to give another enabled operation the chance to race and acquire this lock.
-                    this.Resource.Runtime.ScheduleNextOperation();
+                    this.Resource.Runtime.ScheduleNextOperation(AsyncOperationType.Acquire);
                 }
 
                 if (this.Owner != null)
@@ -415,7 +459,7 @@ namespace Microsoft.Coyote.Tasks
                     // Only release the lock if the invocation is not reentrant.
                     this.LockCountMap.Remove(op);
                     this.UnlockNextReady();
-                    this.Resource.Runtime.ScheduleNextOperation();
+                    this.Resource.Runtime.ScheduleNextOperation(AsyncOperationType.Release);
                 }
 
                 int useCount = Interlocked.Decrement(ref this.UseCount);
@@ -449,6 +493,58 @@ namespace Microsoft.Coyote.Tasks
                 /// Pulses all waiting operations.
                 /// </summary>
                 All
+            }
+
+            /// <summary>
+            /// Returns the hashed state of this SB.
+            /// </summary>
+            internal override int GetHashedState(string abstractionLevel)
+            {
+                unchecked
+                {
+                    var hash = 19;
+
+                    if (abstractionLevel is "default")
+                    {
+                        hash = (hash * 31) + this.GetType().GetHashCode();
+                        // hash = (hash * 31) + this.CurrentState.GetHashCode();
+
+                        foreach (var operations in this.WaitQueue)
+                        {
+                            hash = (hash * 397) + operations.Type.GetHashCode();
+                        }
+
+                        foreach (var operations in this.ReadyQueue)
+                        {
+                            hash = (hash * 397) + operations.Type.GetHashCode();
+                        }
+                    }
+                    else if (abstractionLevel is "custom")
+                    {
+                        hash = (hash * 31) + this.GetType().GetHashCode();
+                        // hash = (hash * 31) + this.CurrentState.GetHashCode();
+
+                        foreach (var operations in this.WaitQueue)
+                        {
+                            hash = (hash * 397) + operations.Type.GetHashCode();
+                        }
+
+                        foreach (var operations in this.ReadyQueue)
+                        {
+                            hash = (hash * 397) + operations.Type.GetHashCode();
+                        }
+
+                        // Adds the user-defined hashed state.
+                        hash = (hash * 31) + this.HashedState;
+                    }
+                    else if (abstractionLevel is "custom-only")
+                    {
+                        // Adds the user-defined hashed state.
+                        hash = (hash * 31) + this.HashedState;
+                    }
+
+                    return hash;
+                }
             }
         }
     }

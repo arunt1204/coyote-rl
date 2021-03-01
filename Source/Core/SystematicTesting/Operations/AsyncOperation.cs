@@ -26,6 +26,24 @@ namespace Microsoft.Coyote.SystematicTesting
         /// </summary>
         internal AsyncOperationStatus Status;
 
+#pragma warning disable SA1648 // inheritdoc should be used with inheriting class
+        /// <inheritdoc/>
+        public AsyncOperationType Type { get; private set; }
+
+        /// <inheritdoc/>
+        public int DefaultHashedState { get; internal set; }
+
+        /// <inheritdoc/>
+        public int InboxOnlyHashedState { get; internal set; }
+
+        /// <inheritdoc/>
+        public int CustomHashedState { get; internal set; }
+
+        /// <inheritdoc/>
+        public int CustomOnlyHashedState { get; internal set; }
+
+#pragma warning restore SA1648 // inheritdoc should be used with inheriting class
+
         /// <summary>
         /// A value that represents the hashed program state when
         /// this operation last executed.
@@ -40,6 +58,7 @@ namespace Microsoft.Coyote.SystematicTesting
             this.Id = operationId;
             this.Name = name;
             this.Status = AsyncOperationStatus.None;
+            this.Type = AsyncOperationType.Start;
         }
 
         /// <summary>
@@ -54,6 +73,14 @@ namespace Microsoft.Coyote.SystematicTesting
         /// Tries to enable the operation, if it is not already enabled.
         /// </summary>
         internal virtual bool TryEnable() => false;
+
+        /// <summary>
+        /// Sets the operation type.
+        /// </summary>
+        internal virtual void SetType(AsyncOperationType operationType)
+        {
+            this.Type = operationType;
+        }
 
         /// <summary>
         /// Checks if the operation is blocked on an uncontrolled dependency.

@@ -38,7 +38,7 @@ namespace Microsoft.Coyote.SystematicTesting
             var op = this.Runtime.GetExecutingOperation<AsyncOperation>();
             op.Status = AsyncOperationStatus.BlockedOnResource;
             this.AwaitingOperations.Add(op);
-            this.Runtime.ScheduleNextOperation();
+            this.Runtime.ScheduleNextOperation(AsyncOperationType.Join);
         }
 
         /// <summary>

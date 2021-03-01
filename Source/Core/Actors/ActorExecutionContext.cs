@@ -923,7 +923,7 @@ namespace Microsoft.Coyote.Actors
 
                 // Using ulong.MaxValue because a Create operation cannot specify
                 // the id of its target, because the id does not exist yet.
-                this.Scheduler.ScheduleNextOperation();
+                this.Scheduler.ScheduleNextOperation(AsyncOperationType.Create);
                 this.ResetProgramCounter(creator);
 
                 if (id is null)
@@ -1053,7 +1053,7 @@ namespace Microsoft.Coyote.Actors
                     "Cannot send event '{0}' to actor id '{1}' that is not bound to an actor instance.",
                     e.GetType().FullName, targetId.Value);
 
-                this.Scheduler.ScheduleNextOperation();
+                this.Scheduler.ScheduleNextOperation(AsyncOperationType.Send);
                 this.ResetProgramCounter(sender as StateMachine);
 
                 // If no group is provided we default to passing along the group from the sender.
@@ -1159,7 +1159,7 @@ namespace Microsoft.Coyote.Actors
                         op.OnCompleted();
 
                         // The actor is inactive or halted, schedule the next enabled operation.
-                        this.Scheduler.ScheduleNextOperation();
+                        this.Scheduler.ScheduleNextOperation(AsyncOperationType.Stop);
                     }
                     catch (Exception ex)
                     {
@@ -1239,7 +1239,7 @@ namespace Microsoft.Coyote.Actors
                 {
                     // Skip the scheduling point, as this is the first dequeue of the event handler,
                     // to avoid unecessery context switches.
-                    this.Scheduler.ScheduleNextOperation();
+                    this.Scheduler.ScheduleNextOperation(AsyncOperationType.Receive);
                     this.ResetProgramCounter(actor);
                 }
 
@@ -1250,7 +1250,7 @@ namespace Microsoft.Coyote.Actors
             /// <inheritdoc/>
             internal override void LogDefaultEventDequeued(Actor actor)
             {
-                this.Scheduler.ScheduleNextOperation();
+                this.Scheduler.ScheduleNextOperation(AsyncOperationType.Receive);
                 this.ResetProgramCounter(actor);
             }
 
@@ -1288,7 +1288,7 @@ namespace Microsoft.Coyote.Actors
             {
                 string stateName = actor is StateMachine stateMachine ? stateMachine.CurrentStateName : null;
                 this.LogWriter.LogReceiveEvent(actor.Id, stateName, e, wasBlocked: false);
-                this.Scheduler.ScheduleNextOperation();
+                this.Scheduler.ScheduleNextOperation(AsyncOperationType.Receive);
                 this.ResetProgramCounter(actor);
             }
 
@@ -1306,7 +1306,7 @@ namespace Microsoft.Coyote.Actors
                     this.LogWriter.LogWaitEvent(actor.Id, stateName, eventWaitTypesArray);
                 }
 
-                this.Scheduler.ScheduleNextOperation();
+                this.Scheduler.ScheduleNextOperation(AsyncOperationType.Join);
                 this.ResetProgramCounter(actor);
             }
 

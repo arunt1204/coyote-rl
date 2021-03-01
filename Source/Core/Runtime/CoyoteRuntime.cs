@@ -261,7 +261,7 @@ namespace Microsoft.Coyote.Runtime
                     op.OnCompleted();
 
                     // Task has completed, schedule the next enabled operation, which terminates exploration.
-                    this.Scheduler.ScheduleNextOperation();
+                    this.Scheduler.ScheduleNextOperation(AsyncOperationType.Stop);
                 }
                 catch (Exception ex)
                 {
@@ -445,7 +445,7 @@ namespace Microsoft.Coyote.Runtime
                 if (context.Options.HasFlag(OperationExecutionOptions.YieldAtStart))
                 {
                     // Try yield execution to the next operation.
-                    this.Scheduler.ScheduleNextOperation(true);
+                    this.Scheduler.ScheduleNextOperation(AsyncOperationType.Default, true);
                 }
 
                 if (op is TaskDelayOperation delayOp)
@@ -1473,12 +1473,12 @@ namespace Microsoft.Coyote.Runtime
         /// Schedules the next controlled asynchronous operation. This method
         /// is only used during testing.
         /// </summary>
-        internal void ScheduleNextOperation()
+        internal void ScheduleNextOperation(AsyncOperationType type = AsyncOperationType.Default, bool isYielding = false)
         {
             var callerOp = this.Scheduler.GetExecutingOperation<AsyncOperation>();
             if (callerOp != null)
             {
-                this.Scheduler.ScheduleNextOperation();
+                this.Scheduler.ScheduleNextOperation(type, isYielding);
             }
         }
 
@@ -1496,6 +1496,74 @@ namespace Microsoft.Coyote.Runtime
                 int hash = 19;
                 hash = (hash * 397) + this.DefaultActorExecutionContext.GetHashedActorState();
                 hash = (hash * 397) + this.SpecificationEngine.GetHashedMonitorState();
+                return hash;
+            }
+        }
+
+        /// <summary>
+        /// Returns the current hashed state of the execution using the specified
+        /// level of abstraction. The hash is updated in each execution step.
+        /// </summary>
+        [DebuggerStepThrough]
+        internal int GetProgramState(string abstractionLevel)
+        {
+            unchecked
+            {
+                int hash = 14689;
+
+                if (abstractionLevel is "default" ||
+                    abstractionLevel is "custom")
+                {
+                    foreach (var operation in this.Scheduler.GetRegisteredOperations().OrderBy(op => op.Id))
+                    {
+                        if (operation is ActorOperation actorOperation)
+                        {
+                            int operationHash = 37;
+                            operationHash = (operationHash * 397) + actorOperation.Actor.GetHashedState(abstractionLevel);
+                            operationHash = (operationHash * 397) + actorOperation.Type.GetHashCode();
+                            hash *= operationHash;
+                        }
+                        else if (operation is TaskOperation taskOperation)
+                        {
+                            int operationHash = 37;
+                            operationHash = (operationHash * 397) + taskOperation.Type.GetHashCode();
+                            hash *= operationHash;
+                        }
+                    }
+
+                    hash = hash + this.SpecificationEngine.GetHashedMonitorState();
+
+                    foreach (var asyncLock in CoyoteTasks.AsyncLock.Locks)
+                    {
+                       hash = (hash * 397) + asyncLock.GetHashedState(abstractionLevel);
+                    }
+
+                    foreach (var syncBlock in CoyoteTasks.SynchronizedBlock.SynchronizedBlocks)
+                    {
+                        hash = (hash * 397) + syncBlock.GetHashedState(abstractionLevel);
+                    }
+
+                    foreach (var semaph in CoyoteTasks.Semaphore.Semaphores)
+                    {
+                        hash = (hash * 397) + semaph.GetHashedState(abstractionLevel);
+                    }
+                }
+                else if (abstractionLevel is "inbox-only" ||
+                    abstractionLevel is "custom-only")
+                {
+                    foreach (var operation in this.Scheduler.GetRegisteredOperations().OrderBy(op => op.Id))
+                    {
+                        if (operation is ActorOperation actorOperation)
+                        {
+                            int operationHash = 37;
+                            operationHash = (operationHash * 397) + actorOperation.Actor.GetHashedState(abstractionLevel);
+                            hash *= operationHash;
+                        }
+                    }
+
+                    hash = hash + this.SpecificationEngine.GetHashedMonitorState();
+                }
+
                 return hash;
             }
         }

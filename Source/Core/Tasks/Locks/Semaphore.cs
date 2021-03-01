@@ -1,7 +1,8 @@
-﻿// Copyright (c) Microsoft Corporation.
+﻿ // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using Microsoft.Coyote.Runtime;
 using Microsoft.Coyote.SystematicTesting;
@@ -23,6 +24,17 @@ namespace Microsoft.Coyote.Tasks
         /// Number of remaining tasks that can enter the semaphore.
         /// </summary>
         public virtual int CurrentCount => this.Instance.CurrentCount;
+
+        /// <summary>
+        /// User-defined hashed state of the Semaphore. Override to improve the
+        /// accuracy of stateful techniques during testing.
+        /// </summary>
+        internal virtual int HashedState => 0;
+
+        /// <summary>
+        /// Set contains all created Locks.
+        /// </summary>
+        public static HashSet<Semaphore> Semaphores = new HashSet<Semaphore>();
 
         /// <summary>
         /// Initializes a new instance of the <see cref="Semaphore"/> class.
@@ -205,6 +217,38 @@ namespace Microsoft.Coyote.Tasks
         }
 
         /// <summary>
+        /// Returns the hashed state of this SP.
+        /// </summary>
+        internal virtual int GetHashedState(string abstractionLevel)
+        {
+            unchecked
+            {
+                var hash = 19;
+
+                if (abstractionLevel is "default")
+                {
+                    hash = (hash * 31) + this.GetType().GetHashCode();
+                    // hash = (hash * 31) + this.CurrentState.GetHashCode();
+                }
+                else if (abstractionLevel is "custom")
+                {
+                    hash = (hash * 31) + this.GetType().GetHashCode();
+                    // hash = (hash * 31) + this.CurrentState.GetHashCode();
+
+                    // Adds the user-defined hashed state.
+                    hash = (hash * 31) + this.HashedState;
+                }
+                else if (abstractionLevel is "custom-only")
+                {
+                    // Adds the user-defined hashed state.
+                    hash = (hash * 31) + this.HashedState;
+                }
+
+                return hash;
+            }
+        }
+
+        /// <summary>
         /// Mock implementation of <see cref="Semaphore"/> that can be controlled during systematic testing.
         /// </summary>
         private sealed class Mock : Semaphore
@@ -245,6 +289,8 @@ namespace Microsoft.Coyote.Tasks
                     "Cannot create semaphore with max count of {0}. The count must be greater than 0.", maxCount);
                 this.MaxCount = maxCount;
                 this.NumAcquired = maxCount - initialCount;
+
+                Semaphores.Add(this);
             }
 
             /// <inheritdoc/>
@@ -275,7 +321,7 @@ namespace Microsoft.Coyote.Tasks
             public override bool Wait(int millisecondsTimeout, CancellationToken cancellationToken)
             {
                 // TODO: support cancellations during testing.
-                this.Resource.Runtime.ScheduleNextOperation();
+                this.Resource.Runtime.ScheduleNextOperation(AsyncOperationType.Join);
 
                 // We need this loop, because when a resource gets released it notifies all asynchronous
                 // operations waiting to acquire it, even if such an operation is still blocked.
@@ -326,7 +372,39 @@ namespace Microsoft.Coyote.Tasks
                 // This must be called outside the context of the semaphore, because it notifies
                 // the scheduler to try schedule another asynchronous operation that could in turn
                 // try to acquire this semaphore causing a deadlock.
-                this.Resource.Runtime.ScheduleNextOperation();
+                this.Resource.Runtime.ScheduleNextOperation(AsyncOperationType.Release);
+            }
+
+            /// <summary>
+            /// Returns the hashed state of this SP.
+            /// </summary>
+            internal override int GetHashedState(string abstractionLevel)
+            {
+                unchecked
+                {
+                    var hash = 19;
+
+                    if (abstractionLevel is "default")
+                    {
+                        hash = (hash * 31) + this.GetType().GetHashCode();
+                        // hash = (hash * 31) + this.CurrentState.GetHashCode();
+                    }
+                    else if (abstractionLevel is "custom")
+                    {
+                        hash = (hash * 31) + this.GetType().GetHashCode();
+                        // hash = (hash * 31) + this.CurrentState.GetHashCode();
+
+                        // Adds the user-defined hashed state.
+                        hash = (hash * 31) + this.HashedState;
+                    }
+                    else if (abstractionLevel is "custom-only")
+                    {
+                        // Adds the user-defined hashed state.
+                        hash = (hash * 31) + this.HashedState;
+                    }
+
+                    return hash;
+                }
             }
         }
     }

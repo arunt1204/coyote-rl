@@ -27,6 +27,17 @@ namespace Microsoft.Coyote.Tasks
         protected internal bool IsAcquired { get; protected set; }
 
         /// <summary>
+        /// Set contains all created Locks.
+        /// </summary>
+        public static HashSet<AsyncLock> Locks = new HashSet<AsyncLock>();
+
+        /// <summary>
+        /// User-defined hashed state of the AsyncLock. Override to improve the
+        /// accuracy of stateful techniques during testing.
+        /// </summary>
+        protected virtual int HashedState => 0;
+
+        /// <summary>
         /// Initializes a new instance of the <see cref="AsyncLock"/> class.
         /// </summary>
         protected AsyncLock()
@@ -96,6 +107,42 @@ namespace Microsoft.Coyote.Tasks
         }
 
         /// <summary>
+        /// Returns the hashed state of this AsyncLock.
+        /// </summary>
+        internal virtual int GetHashedState(string abstractionLevel)
+        {
+            unchecked
+            {
+                var hash = 19;
+
+                if (abstractionLevel is "default")
+                {
+                    hash = (hash * 31) + this.GetType().GetHashCode();
+
+                    foreach (var tcs in this.Awaiters)
+                    {
+                        hash = (hash * 397) + tcs.GetType().GetHashCode();
+                    }
+                }
+                else if (abstractionLevel is "custom")
+                {
+                    hash = (hash * 31) + this.GetType().GetHashCode();
+                    // hash = (hash * 31) + this.CurrentState.GetHashCode();
+
+                    // Adds the user-defined hashed state.
+                    hash = (hash * 31) + this.HashedState;
+                }
+                else if (abstractionLevel is "custom-only")
+                {
+                    // Adds the user-defined hashed state.
+                    hash = (hash * 31) + this.HashedState;
+                }
+
+                return hash;
+            }
+        }
+
+        /// <summary>
         /// Releases the acquired <see cref="AsyncLock"/> when disposed.
         /// </summary>
         public struct Releaser : IDisposable
@@ -135,13 +182,14 @@ namespace Microsoft.Coyote.Tasks
             internal Mock()
                 : base()
             {
+                Locks.Add(this);
                 this.Resource = new Resource();
             }
 
             /// <inheritdoc/>
             public override Task<Releaser> AcquireAsync()
             {
-                this.Resource.Runtime.ScheduleNextOperation();
+                this.Resource.Runtime.ScheduleNextOperation(AsyncOperationType.Acquire);
 
                 TCS awaiter;
                 if (this.IsAcquired)
@@ -190,7 +238,47 @@ namespace Microsoft.Coyote.Tasks
                     // This must be called outside the context of the lock, because it notifies
                     // the scheduler to try schedule another asynchronous operation that could
                     // in turn try to acquire this lock causing a deadlock.
-                    this.Resource.Runtime.ScheduleNextOperation();
+                    this.Resource.Runtime.ScheduleNextOperation(AsyncOperationType.Release);
+                }
+            }
+
+            /// <summary>
+            /// Returns the hashed state of this AsyncLock.
+            /// </summary>
+            internal override int GetHashedState(string abstractionLevel)
+            {
+                unchecked
+                {
+                    var hash = 19;
+
+                    if (abstractionLevel is "default")
+                    {
+                        hash = (hash * 31) + this.GetType().GetHashCode();
+
+                        foreach (var tcs in this.Awaiters)
+                        {
+                            hash = (hash * 397) + tcs.GetType().GetHashCode();
+                        }
+                    }
+                    else if (abstractionLevel is "custom")
+                    {
+                        hash = (hash * 31) + this.GetType().GetHashCode();
+
+                        foreach (var tcs in this.Awaiters)
+                        {
+                            hash = (hash * 397) + tcs.GetType().GetHashCode();
+                        }
+
+                        // Adds the user-defined hashed state.
+                        hash = (hash * 31) + this.HashedState;
+                    }
+                    else if (abstractionLevel is "custom-only")
+                    {
+                        // Adds the user-defined hashed state.
+                        hash = (hash * 31) + this.HashedState;
+                    }
+
+                    return hash;
                 }
             }
         }

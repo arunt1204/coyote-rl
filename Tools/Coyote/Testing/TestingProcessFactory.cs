@@ -79,7 +79,8 @@ namespace Microsoft.Coyote.SystematicTesting
                 arguments.Append($"--sch-{configuration.SchedulingStrategy} {configuration.StrategyBound} ");
             }
             else if (configuration.SchedulingStrategy is "random" ||
-                configuration.SchedulingStrategy is "portfolio")
+                configuration.SchedulingStrategy is "portfolio" ||
+                configuration.SchedulingStrategy is "rl")
             {
                 arguments.Append($"--sch-{configuration.SchedulingStrategy} ");
             }

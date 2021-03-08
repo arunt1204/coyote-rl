@@ -583,13 +583,13 @@ namespace FailureDetectorTests
         }
 
         [Microsoft.Coyote.SystematicTesting.TestAttribute]
-        public static async Task TestFD()
+        public static void TestFD()
         {
             // CoyoteRuntime.Current.
             // TestFib tf = new TestFib(1, 1, 11);
             // await tf.TestRun();
 
-            var configuration = Configuration.Create().WithVerbosityEnabled();
+            var configuration = Configuration.Create().WithQLearningStrategy();
 
             // Creates a new P# runtime instance, and passes an optional configuration.
             var runtime = Microsoft.Coyote.Actors.RuntimeFactory.Create(configuration);

@@ -1,28 +1,20 @@
-﻿// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-
+﻿using Microsoft.Coyote;
+using Microsoft.Coyote.Actors;
+using Microsoft.Coyote.Runtime;
+using Microsoft.Coyote.Specifications;
+using Microsoft.Coyote.Tasks;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Microsoft.Coyote.Specifications;
-using Xunit;
-using Xunit.Abstractions;
 
-namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
+namespace ChordTests
 {
-    /// <summary>
-    /// A single-process implementation of the chord peer-to-peer look up service.
-    ///
-    /// The Chord protocol is described in the following paper:
-    /// https://pdos.csail.mit.edu/papers/chord:sigcomm01/chord_sigcomm.pdf
-    ///
-    /// This test contains a bug that leads to a liveness assertion failure.
-    /// </summary>
-    public class ChordTests : BaseActorSystematicTest
+    public class ChordTest
     {
-        public ChordTests(ITestOutputHelper output)
-            : base(output)
+        public static void Execute(IActorRuntime runtime)
         {
+            runtime.RegisterMonitor<LivenessMonitor>();
+            runtime.CreateActor(typeof(ClusterManager));
         }
 
         private class Finger
@@ -41,41 +33,39 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
 
         private class ClusterManager : StateMachine
         {
-            internal class CreateNewNode : Event
-            {
-            }
+            private class CreateNewNode : Event { }
+            private class TerminateNode : Event { }
+            private class Local : Event { }
 
-            internal class TerminateNode : Event
-            {
-            }
+            int NumOfNodes;
+            int NumOfIds;
 
-            private class Local : Event
-            {
-            }
+            List<ActorId> ChordNodes;
 
-            private int NumOfNodes;
-            private int NumOfIds;
-
-            private List<ActorId> ChordNodes;
-
-            private List<int> Keys;
-            private List<int> NodeIds;
+            List<int> Keys;
+            List<int> NodeIds;
 
             [Start]
             [OnEntry(nameof(InitOnEntry))]
             [OnEventGotoState(typeof(Local), typeof(Waiting))]
-            private class Init : State
-            {
-            }
+            class Init : State { }
 
-            private void InitOnEntry()
+            void InitOnEntry()
             {
-                this.NumOfNodes = 3;
+                this.NumOfNodes = 5;
                 this.NumOfIds = (int)Math.Pow(2, this.NumOfNodes);
 
                 this.ChordNodes = new List<ActorId>();
-                this.NodeIds = new List<int> { 0, 1, 3 };
-                this.Keys = new List<int> { 1, 2, 6 };
+                this.NodeIds = new List<int> { 0, 1, 3, 5, 7 };
+                this.Keys = new List<int> {
+                    1, 2, 4, 6, 9, 11,
+                    13, 22, 27, 29, 33,
+                    38, 45, 53, 67, 72,
+                    81, 95, 101, 102, 104,
+                    106, 109, 111, 113, 122,
+                    127, 129, 133, 138, 145,
+                    153, 167, 172, 181, 195
+                };
 
                 for (int idx = 0; idx < this.NodeIds.Count; idx++)
                 {
@@ -85,12 +75,23 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 var nodeKeys = this.AssignKeysToNodes();
                 for (int idx = 0; idx < this.ChordNodes.Count; idx++)
                 {
-                    var keys = nodeKeys[this.NodeIds[idx]];
-                    this.SendEvent(this.ChordNodes[idx], new ChordNode.SetupEvent(this.NodeIds[idx], new HashSet<int>(keys),
-                        new List<ActorId>(this.ChordNodes), new List<int>(this.NodeIds), this.Id));
+                    var nodeId = this.NodeIds[idx];
+                    if (nodeKeys.ContainsKey(nodeId))
+                    {
+                        var keys = nodeKeys[nodeId];
+                        this.SendEvent(this.ChordNodes[idx], new ChordNode.Config(nodeId, new HashSet<int>(keys),
+                            new List<ActorId>(this.ChordNodes), new List<int>(this.NodeIds), this.Id));
+                    }
+                    else
+                    {
+                        this.SendEvent(this.ChordNodes[idx], new ChordNode.Config(nodeId, new HashSet<int>(),
+                            new List<ActorId>(this.ChordNodes), new List<int>(this.NodeIds), this.Id));
+                    }
                 }
 
-                this.CreateActor(typeof(Client), new Client.SetupEvent(this.Id, new List<int>(this.Keys)));
+                this.CreateActor(typeof(Client),
+                    new Client.Config(this.Id, new List<int>(this.Keys)));
+
                 this.RaiseEvent(new Local());
             }
 
@@ -98,16 +99,14 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
             [OnEventDoAction(typeof(CreateNewNode), nameof(ProcessCreateNewNode))]
             [OnEventDoAction(typeof(TerminateNode), nameof(ProcessTerminateNode))]
             [OnEventDoAction(typeof(ChordNode.JoinAck), nameof(QueryStabilize))]
-            private class Waiting : State
-            {
-            }
+            class Waiting : State { }
 
-            private void ForwardFindSuccessor(Event e)
+            void ForwardFindSuccessor(Event e)
             {
                 this.SendEvent(this.ChordNodes[0], e);
             }
 
-            private void ProcessCreateNewNode()
+            void ProcessCreateNewNode()
             {
                 int newId = -1;
                 while ((newId < 0 || this.NodeIds.Contains(newId)) &&
@@ -134,7 +133,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                     new List<int>(this.NodeIds), this.NumOfIds, this.Id));
             }
 
-            private void ProcessTerminateNode()
+            void ProcessTerminateNode()
             {
                 int endId = -1;
                 while ((endId < 0 || !this.NodeIds.Contains(endId)) &&
@@ -160,7 +159,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 this.SendEvent(endNode, new ChordNode.Terminate());
             }
 
-            private void QueryStabilize()
+            void QueryStabilize()
             {
                 foreach (var node in this.ChordNodes)
                 {
@@ -168,7 +167,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            private Dictionary<int, List<int>> AssignKeysToNodes()
+            Dictionary<int, List<int>> AssignKeysToNodes()
             {
                 var nodeKeys = new Dictionary<int, List<int>>();
                 for (int i = this.Keys.Count - 1; i >= 0; i--)
@@ -213,23 +212,23 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
 
         private class ChordNode : StateMachine
         {
-            internal class SetupEvent : Event
+            internal class Config : Event
             {
                 public int Id;
                 public HashSet<int> Keys;
                 public List<ActorId> Nodes;
                 public List<int> NodeIds;
-                public ActorId ManagerId;
+                public ActorId Manager;
 
-                public SetupEvent(int id, HashSet<int> keys, List<ActorId> nodes,
-                    List<int> nodeIds, ActorId managerId)
+                public Config(int id, HashSet<int> keys, List<ActorId> nodes,
+                    List<int> nodeIds, ActorId manager)
                     : base()
                 {
                     this.Id = id;
                     this.Keys = keys;
                     this.Nodes = nodes;
                     this.NodeIds = nodeIds;
-                    this.ManagerId = managerId;
+                    this.Manager = manager;
                 }
             }
 
@@ -239,17 +238,17 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 public List<ActorId> Nodes;
                 public List<int> NodeIds;
                 public int NumOfIds;
-                public ActorId ManagerId;
+                public ActorId Manager;
 
                 public Join(int id, List<ActorId> nodes, List<int> nodeIds,
-                    int numOfIds, ActorId managerId)
+                    int numOfIds, ActorId manager)
                     : base()
                 {
                     this.Id = id;
                     this.Nodes = nodes;
                     this.NodeIds = nodeIds;
                     this.NumOfIds = numOfIds;
-                    this.ManagerId = managerId;
+                    this.Manager = manager;
                 }
             }
 
@@ -347,7 +346,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            private class NotifySuccessor : Event
+            internal class NotifySuccessor : Event
             {
                 public ActorId Node;
 
@@ -358,63 +357,71 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            internal class JoinAck : Event
+            internal class JoinAck : Event { }
+            internal class Stabilize : Event { }
+            internal class Terminate : Event { }
+            internal class Local : Event { }
+
+            int NodeId;
+            HashSet<int> Keys;
+            int NumOfIds;
+
+            Dictionary<int, Finger> FingerTable;
+            ActorId Predecessor;
+
+            ActorId Manager;
+
+            protected override int HashedState
             {
+                get
+                {
+                    int hash = 14689;
+
+                    if (this.Keys != null)
+                    {
+                        foreach (var key in this.Keys)
+                        {
+                            int keyHash = 37;
+                            keyHash += (keyHash * 397) + key.GetHashCode();
+                            hash *= keyHash;
+                        }
+                    }
+
+                    return hash;
+                }
             }
-
-            internal class Stabilize : Event
-            {
-            }
-
-            internal class Terminate : Event
-            {
-            }
-
-            private class Local : Event
-            {
-            }
-
-            private int NodeId;
-            private HashSet<int> Keys;
-            private int NumOfIds;
-
-            private Dictionary<int, Finger> FingerTable;
-            private ActorId Predecessor;
-
-            private ActorId ManagerId;
 
             [Start]
             [OnEntry(nameof(InitOnEntry))]
             [OnEventGotoState(typeof(Local), typeof(Waiting))]
-            [OnEventDoAction(typeof(SetupEvent), nameof(Setup))]
+            [OnEventDoAction(typeof(Config), nameof(Configure))]
             [OnEventDoAction(typeof(Join), nameof(JoinCluster))]
-            [DeferEvents(typeof(AskForKeys), typeof(NotifySuccessor), typeof(Stabilize))]
-            private class Init : State
-            {
-            }
+            [DeferEvents(typeof(AskForKeys), typeof(FindPredecessor), typeof(FindSuccessor),
+                typeof(NotifySuccessor), typeof(Stabilize), typeof(Terminate))]
+            class Init : State { }
 
-            private void InitOnEntry()
+            void InitOnEntry()
             {
                 this.FingerTable = new Dictionary<int, Finger>();
             }
 
-            private void Setup(Event e)
+            void Configure(Event e)
             {
-                this.NodeId = (e as SetupEvent).Id;
-                this.Keys = (e as SetupEvent).Keys;
-                this.ManagerId = (e as SetupEvent).ManagerId;
+                this.NodeId = (e as Config).Id;
+                this.Keys = (e as Config).Keys;
+                this.Manager = (e as Config).Manager;
 
-                var nodes = (e as SetupEvent).Nodes;
-                var nodeIds = (e as SetupEvent).NodeIds;
+                var nodes = (e as Config).Nodes;
+                var nodeIds = (e as Config).NodeIds;
 
                 this.NumOfIds = (int)Math.Pow(2, nodes.Count);
 
                 for (var idx = 1; idx <= nodes.Count; idx++)
                 {
-                    var start = (this.NodeId + (int)Math.Pow(2, idx - 1)) % this.NumOfIds;
+                    var start = (this.NodeId + (int)Math.Pow(2, (idx - 1))) % this.NumOfIds;
                     var end = (this.NodeId + (int)Math.Pow(2, idx)) % this.NumOfIds;
 
-                    var nodeId = GetSuccessorNodeId(start, nodeIds);
+                    var nodeId = this.GetSuccessorNodeId(start, nodeIds);
                     this.FingerTable.Add(start, new Finger(start, end, nodes[nodeId]));
                 }
 
@@ -422,7 +429,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 {
                     if (nodeIds[idx] == this.NodeId)
                     {
-                        this.Predecessor = nodes[WrapSubtract(idx, 1, nodeIds.Count)];
+                        this.Predecessor = nodes[this.WrapSubtract(idx, 1, nodeIds.Count)];
                         break;
                     }
                 }
@@ -430,10 +437,10 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 this.RaiseEvent(new Local());
             }
 
-            private void JoinCluster(Event e)
+            void JoinCluster(Event e)
             {
                 this.NodeId = (e as Join).Id;
-                this.ManagerId = (e as Join).ManagerId;
+                this.Manager = (e as Join).Manager;
                 this.NumOfIds = (e as Join).NumOfIds;
 
                 var nodes = (e as Join).Nodes;
@@ -441,16 +448,16 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
 
                 for (var idx = 1; idx <= nodes.Count; idx++)
                 {
-                    var start = (this.NodeId + (int)Math.Pow(2, idx - 1)) % this.NumOfIds;
+                    var start = (this.NodeId + (int)Math.Pow(2, (idx - 1))) % this.NumOfIds;
                     var end = (this.NodeId + (int)Math.Pow(2, idx)) % this.NumOfIds;
 
-                    var nodeId = GetSuccessorNodeId(start, nodeIds);
+                    var nodeId = this.GetSuccessorNodeId(start, nodeIds);
                     this.FingerTable.Add(start, new Finger(start, end, nodes[nodeId]));
                 }
 
                 var successor = this.FingerTable[(this.NodeId + 1) % this.NumOfIds].Node;
 
-                this.SendEvent(this.ManagerId, new JoinAck());
+                this.SendEvent(this.Manager, new JoinAck());
                 this.SendEvent(successor, new NotifySuccessor(this.Id));
             }
 
@@ -464,15 +471,13 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
             [OnEventDoAction(typeof(NotifySuccessor), nameof(UpdatePredecessor))]
             [OnEventDoAction(typeof(Stabilize), nameof(ProcessStabilize))]
             [OnEventDoAction(typeof(Terminate), nameof(ProcessTerminate))]
-            private class Waiting : State
-            {
-            }
+            class Waiting : State { }
 
-            private void ProcessFindSuccessor(Event e)
+            void ProcessFindSuccessor(Event e)
             {
                 var sender = (e as FindSuccessor).Sender;
                 var key = (e as FindSuccessor).Key;
-
+                this.Id.Runtime.Logger.WriteLine($"<ChordLog> '{this.Id}' trying to find successor of key '{key}'");
                 if (this.Keys.Contains(key))
                 {
                     this.SendEvent(sender, new FindSuccessorResp(this.Id, key));
@@ -494,7 +499,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                         if (((finger.Value.Start > finger.Value.End) &&
                             (finger.Value.Start <= key || key < finger.Value.End)) ||
                             ((finger.Value.Start < finger.Value.End) &&
-                            finger.Value.Start <= key && key < finger.Value.End))
+                            (finger.Value.Start <= key && key < finger.Value.End)))
                         {
                             idToAsk = finger.Key;
                         }
@@ -517,14 +522,15 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                             }
                         }
 
-                        this.Assert(!this.FingerTable[idToAsk].Node.Equals(this.Id), "Cannot locate successor of {0}.", key);
+                        this.Assert(!this.FingerTable[idToAsk].Node.Equals(this.Id),
+                            "Cannot locate successor of {0}.", key);
                     }
 
                     this.SendEvent(this.FingerTable[idToAsk].Node, new FindSuccessor(sender, key));
                 }
             }
 
-            private void ProcessFindPredecessor(Event e)
+            void ProcessFindPredecessor(Event e)
             {
                 var sender = (e as FindPredecessor).Sender;
                 if (this.Predecessor != null)
@@ -533,13 +539,13 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            private void ProcessQueryId(Event e)
+            void ProcessQueryId(Event e)
             {
                 var sender = (e as QueryId).Sender;
                 this.SendEvent(sender, new QueryIdResp(this.NodeId));
             }
 
-            private void SendKeys(Event e)
+            void SendKeys(Event e)
             {
                 var sender = (e as AskForKeys).Node;
                 var senderId = (e as AskForKeys).Id;
@@ -566,7 +572,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            private void ProcessStabilize()
+            void ProcessStabilize()
             {
                 var successor = this.FingerTable[(this.NodeId + 1) % this.NumOfIds].Node;
                 this.SendEvent(successor, new FindPredecessor(this.Id));
@@ -580,22 +586,24 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            private void ProcessFindSuccessorResp(Event e)
+            void ProcessFindSuccessorResp(Event e)
             {
                 var successor = (e as FindSuccessorResp).Node;
                 var key = (e as FindSuccessorResp).Key;
 
-                this.Assert(this.FingerTable.ContainsKey(key), "Finger table of {0} does not contain {1}.", this.NodeId, key);
-                this.FingerTable[key] = new Finger(this.FingerTable[key].Start, this.FingerTable[key].End, successor);
+                this.Assert(this.FingerTable.ContainsKey(key),
+                    "Finger table of {0} does not contain {1}.", this.NodeId, key);
+                this.FingerTable[key] = new Finger(this.FingerTable[key].Start,
+                    this.FingerTable[key].End, successor);
             }
 
-            private void ProcessFindPredecessorResp(Event e)
+            void ProcessFindPredecessorResp(Event e)
             {
                 var successor = (e as FindPredecessorResp).Node;
                 if (!successor.Equals(this.Id))
                 {
-                    this.FingerTable[(this.NodeId + 1) % this.NumOfIds] = new Finger(
-                        this.FingerTable[(this.NodeId + 1) % this.NumOfIds].Start,
+                    this.FingerTable[(this.NodeId + 1) % this.NumOfIds] =
+                        new Finger(this.FingerTable[(this.NodeId + 1) % this.NumOfIds].Start,
                         this.FingerTable[(this.NodeId + 1) % this.NumOfIds].End,
                         successor);
 
@@ -604,7 +612,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            private void UpdatePredecessor(Event e)
+            void UpdatePredecessor(Event e)
             {
                 var predecessor = (e as NotifySuccessor).Node;
                 if (!predecessor.Equals(this.Id))
@@ -613,7 +621,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            private void UpdateKeys(Event e)
+            void UpdateKeys(Event e)
             {
                 var keys = (e as AskForKeysResp).Keys;
                 foreach (var key in keys)
@@ -622,9 +630,12 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            private void ProcessTerminate() => this.RaiseHaltEvent();
+            void ProcessTerminate()
+            {
+                this.RaiseEvent(HaltEvent.Instance);
+            }
 
-            private static int GetSuccessorNodeId(int start, List<int> nodeIds)
+            int GetSuccessorNodeId(int start, List<int> nodeIds)
             {
                 var candidate = -1;
                 foreach (var id in nodeIds.Where(v => v >= start))
@@ -658,7 +669,18 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 return candidate;
             }
 
-            private static int WrapSubtract(int left, int right, int ceiling)
+            int WrapAdd(int left, int right, int ceiling)
+            {
+                int result = left + right;
+                if (result > ceiling)
+                {
+                    result = ceiling - result;
+                }
+
+                return result;
+            }
+
+            int WrapSubtract(int left, int right, int ceiling)
             {
                 int result = left - right;
                 if (result < 0)
@@ -668,16 +690,32 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
 
                 return result;
             }
+
+            void EmitFingerTableAndKeys()
+            {
+                this.Id.Runtime.Logger.WriteLine(" ... Printing finger table of node {0}:", this.NodeId);
+                foreach (var finger in this.FingerTable)
+                {
+                    this.Id.Runtime.Logger.WriteLine("  >> " + finger.Key + " | [" + finger.Value.Start +
+                        ", " + finger.Value.End + ") | " + finger.Value.Node);
+                }
+
+                this.Id.Runtime.Logger.WriteLine(" ... Printing keys of node {0}:", this.NodeId);
+                foreach (var key in this.Keys)
+                {
+                    this.Id.Runtime.Logger.WriteLine("  >> Key-" + key);
+                }
+            }
         }
 
         private class Client : StateMachine
         {
-            internal class SetupEvent : Event
+            internal class Config : Event
             {
                 public ActorId ClusterManager;
                 public List<int> Keys;
 
-                public SetupEvent(ActorId clusterManager, List<int> keys)
+                public Config(ActorId clusterManager, List<int> keys)
                     : base()
                 {
                     this.ClusterManager = clusterManager;
@@ -685,26 +723,22 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            private class Local : Event
-            {
-            }
+            internal class Local : Event { }
 
-            private ActorId ClusterManager;
+            ActorId ClusterManager;
 
-            private List<int> Keys;
-            private int QueryCounter;
+            List<int> Keys;
+            int QueryCounter;
 
             [Start]
             [OnEntry(nameof(InitOnEntry))]
             [OnEventGotoState(typeof(Local), typeof(Querying))]
-            private class Init : State
-            {
-            }
+            class Init : State { }
 
-            private void InitOnEntry(Event e)
+            void InitOnEntry(Event e)
             {
-                this.ClusterManager = (e as SetupEvent).ClusterManager;
-                this.Keys = (e as SetupEvent).Keys;
+                this.ClusterManager = (e as Config).ClusterManager;
+                this.Keys = (e as Config).Keys;
 
                 // LIVENESS BUG: can never detect the key, and keeps looping without
                 // exiting the process. Enable to introduce the bug.
@@ -717,29 +751,16 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
 
             [OnEntry(nameof(QueryingOnEntry))]
             [OnEventGotoState(typeof(Local), typeof(Waiting))]
-            private class Querying : State
-            {
-            }
+            class Querying : State { }
 
-            private void QueryingOnEntry()
+            void QueryingOnEntry()
             {
-                if (this.QueryCounter < 5)
+                if (this.QueryCounter < 1)
                 {
-                    if (this.RandomBoolean())
-                    {
-                        var key = this.GetNextQueryKey();
-                        this.Logger.WriteLine($"<ChordLog> Client is searching for successor of key '{key}'.");
-                        this.SendEvent(this.ClusterManager, new ChordNode.FindSuccessor(this.Id, key));
-                        this.Monitor<LivenessMonitor>(new LivenessMonitor.NotifyClientRequest(key));
-                    }
-                    else if (this.RandomBoolean())
-                    {
-                        this.SendEvent(this.ClusterManager, new ClusterManager.CreateNewNode());
-                    }
-                    else
-                    {
-                        this.SendEvent(this.ClusterManager, new ClusterManager.TerminateNode());
-                    }
+                    var key = this.GetNextQueryKey();
+                    this.Id.Runtime.Logger.WriteLine($"<ChordLog> Client is searching for successor of key '{key}'");
+                    this.SendEvent(this.ClusterManager, new ChordNode.FindSuccessor(this.Id, key));
+                    this.Monitor<LivenessMonitor>(new LivenessMonitor.NotifyClientRequest(key));
 
                     this.QueryCounter++;
                 }
@@ -747,7 +768,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 this.RaiseEvent(new Local());
             }
 
-            private int GetNextQueryKey()
+            int GetNextQueryKey()
             {
                 int keyIndex = -1;
                 while (keyIndex < 0)
@@ -768,11 +789,9 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
             [OnEventGotoState(typeof(Local), typeof(Querying))]
             [OnEventDoAction(typeof(ChordNode.FindSuccessorResp), nameof(ProcessFindSuccessorResp))]
             [OnEventDoAction(typeof(ChordNode.QueryIdResp), nameof(ProcessQueryIdResp))]
-            private class Waiting : State
-            {
-            }
+            class Waiting : State { }
 
-            private void ProcessFindSuccessorResp(Event e)
+            void ProcessFindSuccessorResp(Event e)
             {
                 var successor = (e as ChordNode.FindSuccessorResp).Node;
                 var key = (e as ChordNode.FindSuccessorResp).Key;
@@ -780,7 +799,10 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 this.SendEvent(successor, new ChordNode.QueryId(this.Id));
             }
 
-            private void ProcessQueryIdResp() => this.RaiseEvent(new Local());
+            void ProcessQueryIdResp()
+            {
+                this.RaiseEvent(new Local());
+            }
         }
 
         private class LivenessMonitor : Monitor
@@ -809,61 +831,43 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
 
             [Start]
             [OnEntry(nameof(InitOnEntry))]
-            private class Init : State
-            {
-            }
+            class Init : State { }
 
-            private void InitOnEntry() => this.RaiseGotoStateEvent<Responded>();
+            void InitOnEntry()
+            {
+                this.RaiseGotoStateEvent<Responded>();
+            }
 
             [Cold]
             [OnEventGotoState(typeof(NotifyClientRequest), typeof(Requested))]
-            private class Responded : State
-            {
-            }
+            class Responded : State { }
 
             [Hot]
             [OnEventGotoState(typeof(NotifyClientResponse), typeof(Responded))]
-            private class Requested : State
-            {
-            }
+            class Requested : State { }
+        }
+    }
+
+    public class Chord
+    {
+        static void Main(string[] args)
+        {
+            Console.WriteLine("Hello World!");
         }
 
-        [Theory(Timeout = 10000)]
-        [InlineData(0)]
-        public void TestLivenessBugInChordProtocol(uint seed)
+        [Microsoft.Coyote.SystematicTesting.TestAttribute]
+        public static async Task TestChord()
         {
-            var configuration = GetConfiguration();
-            configuration.MaxUnfairSchedulingSteps = 200;
-            configuration.MaxFairSchedulingSteps = 2000;
-            configuration.LivenessTemperatureThreshold = 1000;
-            configuration.RandomGeneratorSeed = seed;
-            configuration.TestingIterations = 1;
+            // CoyoteRuntime.Current.
+            // TestFib tf = new TestFib(1, 1, 11);
+            // await tf.TestRun();
 
-            this.TestWithError(r =>
-            {
-                r.RegisterMonitor<LivenessMonitor>();
-                r.CreateActor(typeof(ClusterManager));
-            },
-            configuration: configuration,
-            expectedError: "LivenessMonitor detected potential liveness bug in hot state 'Requested'.",
-            replay: true);
-        }
+            var configuration = Configuration.Create().WithVerbosityEnabled();
 
-        [Fact(Timeout = 5000)]
-        public void TestLivenessBugInChordProtocol2()
-        {
-            var configuration = GetConfiguration();
-            configuration.MaxUnfairSchedulingSteps = 200;
-            configuration.MaxFairSchedulingSteps = 2000;
-            configuration.LivenessTemperatureThreshold = 1000;
-            configuration.TestingIterations = 10000;
+            // Creates a new P# runtime instance, and passes an optional configuration.
+            var runtime = Microsoft.Coyote.Actors.RuntimeFactory.Create(configuration);
 
-            this.Test(r =>
-            {
-                r.RegisterMonitor<LivenessMonitor>();
-                r.CreateActor(typeof(ClusterManager));
-            },
-            configuration: GetConfiguration().WithQLearningStrategy());
+            ChordTest.Execute(runtime);
         }
     }
 }

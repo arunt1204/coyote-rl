@@ -1533,7 +1533,7 @@ namespace Microsoft.Coyote.Runtime
 
                     hash = hash + this.SpecificationEngine.GetHashedMonitorState();
 
-                    foreach (var asyncLock in CoyoteTasks.AsyncLock.Locks)
+                    /* foreach (var asyncLock in CoyoteTasks.AsyncLock.Locks)
                     {
                        hash = (hash * 397) + asyncLock.GetHashedState(abstractionLevel);
                     }
@@ -1546,7 +1546,7 @@ namespace Microsoft.Coyote.Runtime
                     foreach (var semaph in CoyoteTasks.Semaphore.Semaphores)
                     {
                         hash = (hash * 397) + semaph.GetHashedState(abstractionLevel);
-                    }
+                    } */
                 }
                 else if (abstractionLevel is "inbox-only" ||
                     abstractionLevel is "custom-only")

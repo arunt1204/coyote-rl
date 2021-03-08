@@ -1,28 +1,22 @@
-﻿// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-
-using System.Collections.Generic;
+﻿using Microsoft.Coyote;
+using Microsoft.Coyote.Actors;
 using Microsoft.Coyote.Runtime;
 using Microsoft.Coyote.Specifications;
-using Xunit;
-using Xunit.Abstractions;
+using Microsoft.Coyote.Tasks;
+using System;
+using System.Collections.Generic;
 
-namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
+namespace RaftTests
 {
-    /// <summary>
-    /// This is a simple implementation of the Raft consensus protocol
-    /// described in the following paper:
-    ///
-    /// https://raft.github.io/raft.pdf
-    ///
-    /// This test contains a bug that leads to duplicate leader election
-    /// in the same term.
-    /// </summary>
-    public class RaftTests : BaseActorSystematicTest
+    public class RaftTest
     {
-        public RaftTests(ITestOutputHelper output)
-            : base(output)
+        static private int LeaderElectionDepth;
+
+        public static void Execute(IActorRuntime runtime, int depth)
         {
+            LeaderElectionDepth = depth;
+            runtime.RegisterMonitor<SafetyMonitor>();
+            runtime.CreateActor(typeof(ClusterManager));
         }
 
         private class Log
@@ -63,30 +57,39 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            internal class ShutDown : Event
+            internal class ShutDown : Event { }
+            private class LocalEvent : Event { }
+
+            ActorId[] Servers;
+            int NumberOfServers;
+
+            ActorId Leader;
+            int LeaderTerm;
+
+            ActorId Client;
+
+            protected override int HashedState
             {
+                get
+                {
+                    unchecked
+                    {
+                        int hash = 37;
+                        hash += (hash * 397) + this.NumberOfServers;
+                        hash += this.Leader != null ? (hash * 397) + this.Leader.GetHashCode() : hash;
+                        hash += (hash * 397) + this.LeaderTerm;
+
+                        return hash;
+                    }
+                }
             }
-
-            private class LocalEvent : Event
-            {
-            }
-
-            private ActorId[] Servers;
-            private int NumberOfServers;
-
-            private ActorId Leader;
-            private int LeaderTerm;
-
-            private ActorId Client;
 
             [Start]
             [OnEntry(nameof(EntryOnInit))]
             [OnEventGotoState(typeof(LocalEvent), typeof(Configuring))]
-            private class Init : State
-            {
-            }
+            class Init : State { }
 
-            private void EntryOnInit()
+            void EntryOnInit()
             {
                 this.NumberOfServers = 5;
                 this.LeaderTerm = 0;
@@ -95,21 +98,19 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
 
                 for (int idx = 0; idx < this.NumberOfServers; idx++)
                 {
-                    this.Servers[idx] = this.CreateActor(typeof(Server));
+                    this.Servers[idx] = this.CreateActor(typeof(Server), $"Server{idx}");
                 }
 
-                this.Client = this.CreateActor(typeof(Client));
+                this.Client = this.CreateActor(typeof(Client), "Client");
 
                 this.RaiseEvent(new LocalEvent());
             }
 
             [OnEntry(nameof(ConfiguringOnInit))]
             [OnEventGotoState(typeof(LocalEvent), typeof(Availability.Unavailable))]
-            private class Configuring : State
-            {
-            }
+            class Configuring : State { }
 
-            private void ConfiguringOnInit()
+            void ConfiguringOnInit()
             {
                 for (int idx = 0; idx < this.NumberOfServers; idx++)
                 {
@@ -121,58 +122,60 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 this.RaiseEvent(new LocalEvent());
             }
 
-            private class Availability : StateGroup
+            class Availability : StateGroup
             {
                 [OnEventDoAction(typeof(NotifyLeaderUpdate), nameof(BecomeAvailable))]
                 [OnEventDoAction(typeof(ShutDown), nameof(ShuttingDown))]
                 [OnEventGotoState(typeof(LocalEvent), typeof(Available))]
                 [DeferEvents(typeof(Client.Request))]
-                public class Unavailable : State
-                {
-                }
+                public class Unavailable : State { }
+
 
                 [OnEventDoAction(typeof(Client.Request), nameof(SendClientRequestToLeader))]
                 [OnEventDoAction(typeof(RedirectRequest), nameof(RedirectClientRequest))]
                 [OnEventDoAction(typeof(NotifyLeaderUpdate), nameof(RefreshLeader))]
                 [OnEventDoAction(typeof(ShutDown), nameof(ShuttingDown))]
                 [OnEventGotoState(typeof(LocalEvent), typeof(Unavailable))]
-                public class Available : State
-                {
-                }
+                public class Available : State { }
             }
 
-            private void BecomeAvailable(Event e)
+            void BecomeAvailable(Event e)
             {
                 this.UpdateLeader(e as NotifyLeaderUpdate);
                 this.RaiseEvent(new LocalEvent());
             }
 
-            private void SendClientRequestToLeader(Event e)
+
+            void SendClientRequestToLeader(Event e)
             {
                 this.SendEvent(this.Leader, e);
             }
 
-            private void RedirectClientRequest(Event e)
+            void RedirectClientRequest(Event e)
             {
                 this.SendEvent(this.Id, (e as RedirectRequest).Request);
             }
 
-            private void RefreshLeader(Event e)
+            void RefreshLeader(Event e)
             {
                 this.UpdateLeader(e as NotifyLeaderUpdate);
             }
 
-            private void ShuttingDown()
+            void ShuttingDown()
             {
                 for (int idx = 0; idx < this.NumberOfServers; idx++)
                 {
                     this.SendEvent(this.Servers[idx], new Server.ShutDown());
                 }
 
-                this.RaiseHaltEvent();
+                this.RaiseEvent(HaltEvent.Instance);
             }
 
-            private void UpdateLeader(NotifyLeaderUpdate request)
+            /// <summary>
+            /// Updates the leader.
+            /// </summary>
+            /// <param name="request">NotifyLeaderUpdate</param>
+            void UpdateLeader(NotifyLeaderUpdate request)
             {
                 if (this.LeaderTerm < request.Term)
                 {
@@ -182,10 +185,6 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
             }
         }
 
-        /// <summary>
-        /// A server in Raft can be one of the following three roles:
-        /// follower, candidate or leader.
-        /// </summary>
         private class Server : StateMachine
         {
             /// <summary>
@@ -211,10 +210,10 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
             /// </summary>
             public class VoteRequest : Event
             {
-                public int Term; // candidate's term
+                public int Term; // candidate’s term
                 public ActorId CandidateId; // candidate requesting vote
-                public int LastLogIndex; // index of candidate's last log entry
-                public int LastLogTerm; // term of candidate's last log entry
+                public int LastLogIndex; // index of candidate’s last log entry
+                public int LastLogTerm; // term of candidate’s last log entry
 
                 public VoteRequest(int term, ActorId candidateId, int lastLogIndex, int lastLogTerm)
                     : base()
@@ -253,7 +252,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 public int PrevLogIndex; // index of log entry immediately preceding new ones
                 public int PrevLogTerm; // term of PrevLogIndex entry
                 public List<Log> Entries; // log entries to store (empty for heartbeat; may send more than one for efficiency)
-                public int LeaderCommit; // leader's CommitIndex
+                public int LeaderCommit; // leader’s CommitIndex
 
                 public ActorId ReceiverEndpoint; // client
 
@@ -293,111 +292,133 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
             }
 
             // Events for transitioning a server between roles.
-            private class BecomeFollower : Event
-            {
-            }
+            private class BecomeFollower : Event { }
+            private class BecomeCandidate : Event { }
+            private class BecomeLeader : Event { }
 
-            private class BecomeCandidate : Event
-            {
-            }
-
-            private class BecomeLeader : Event
-            {
-            }
-
-            internal class ShutDown : Event
-            {
-            }
+            internal class ShutDown : Event { }
 
             /// <summary>
             /// The id of this server.
             /// </summary>
-            private int ServerId;
+            int ServerId;
 
             /// <summary>
-            /// The cluster manager id.
+            /// The cluster manager machine.
             /// </summary>
-            private ActorId ClusterManager;
+            ActorId ClusterManager;
 
             /// <summary>
             /// The servers.
             /// </summary>
-            private ActorId[] Servers;
+            ActorId[] Servers;
 
             /// <summary>
             /// Leader id.
             /// </summary>
-            private ActorId LeaderId;
+            ActorId LeaderId;
 
             /// <summary>
             /// The election timer of this server.
             /// </summary>
-            private ActorId ElectionTimer;
+            ActorId ElectionTimer;
 
             /// <summary>
             /// The periodic timer of this server.
             /// </summary>
-            private ActorId PeriodicTimer;
+            ActorId PeriodicTimer;
 
             /// <summary>
             /// Latest term server has seen (initialized to 0 on
             /// first boot, increases monotonically).
             /// </summary>
-            private int CurrentTerm;
+            int CurrentTerm;
 
             /// <summary>
             /// Candidate id that received vote in current term (or null if none).
             /// </summary>
-            private ActorId VotedFor;
+            ActorId VotedFor;
 
             /// <summary>
             /// Log entries.
             /// </summary>
-            private List<Log> Logs;
+            List<Log> Logs;
 
             /// <summary>
             /// Index of highest log entry known to be committed (initialized
             /// to 0, increases monotonically).
             /// </summary>
-            private int CommitIndex;
+            int CommitIndex;
 
             /// <summary>
-            /// Index of the highest log entry applied (initialized to 0, increases monotonically).
+            /// Index of highest log entry applied to state machine (initialized
+            /// to 0, increases monotonically).
             /// </summary>
-            private int LastApplied;
+            int LastApplied;
 
             /// <summary>
             /// For each server, index of the next log entry to send to that
             /// server (initialized to leader last log index + 1).
             /// </summary>
-            private Dictionary<ActorId, int> NextIndex;
+            Dictionary<ActorId, int> NextIndex;
 
             /// <summary>
             /// For each server, index of highest log entry known to be replicated
             /// on server (initialized to 0, increases monotonically).
             /// </summary>
-            private Dictionary<ActorId, int> MatchIndex;
+            Dictionary<ActorId, int> MatchIndex;
 
             /// <summary>
             /// Number of received votes.
             /// </summary>
-            private int VotesReceived;
+            int VotesReceived;
 
             /// <summary>
             /// The latest client request.
             /// </summary>
-            private Client.Request LastClientRequest;
+            Client.Request LastClientRequest;
+
+            /// <summary>
+            /// Add custom hash
+            /// </summary>
+            protected override int HashedState
+            {
+                get
+                {
+                    unchecked
+                    {
+                        int hash = 37;
+
+                        if (this.Logs != null)
+                        {
+                            foreach (var log in this.Logs)
+                            {
+                                hash = (hash * 397) + log.Term.GetHashCode();
+                                hash = (hash * 397) + log.Command.GetHashCode();
+                            }
+                        }
+
+                        hash += this.LeaderId != null ? (hash * 397) + this.LeaderId.GetHashCode() : hash;
+                        hash += this.VotedFor != null ? (hash * 397) + this.VotedFor.GetHashCode() : hash;
+
+                        hash += (hash * 397) + this.CurrentTerm;
+                        hash += (hash * 397) + VotesReceived;
+                        hash += (hash * 397) + CommitIndex;
+                        hash += (hash * 397) + LastApplied;
+
+                        return hash;
+                    }
+                }
+            }
 
             [Start]
             [OnEntry(nameof(EntryOnInit))]
-            [OnEventDoAction(typeof(ConfigureEvent), nameof(SetupEvent))]
+            [OnEventDoAction(typeof(ConfigureEvent), nameof(Configure))]
             [OnEventGotoState(typeof(BecomeFollower), typeof(Follower))]
             [DeferEvents(typeof(VoteRequest), typeof(AppendEntriesRequest))]
-            private class Init : State
-            {
-            }
+            class Init : State { }
 
-            private void EntryOnInit()
+            void EntryOnInit()
             {
                 this.CurrentTerm = 0;
 
@@ -413,16 +434,16 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 this.MatchIndex = new Dictionary<ActorId, int>();
             }
 
-            private void SetupEvent(Event e)
+            void Configure(Event e)
             {
                 this.ServerId = (e as ConfigureEvent).Id;
                 this.Servers = (e as ConfigureEvent).Servers;
                 this.ClusterManager = (e as ConfigureEvent).ClusterManager;
 
-                this.ElectionTimer = this.CreateActor(typeof(ElectionTimer));
+                this.ElectionTimer = this.CreateActor(typeof(ElectionTimer), $"ElectionTimer{this.ServerId}");
                 this.SendEvent(this.ElectionTimer, new ElectionTimer.ConfigureEvent(this.Id));
 
-                this.PeriodicTimer = this.CreateActor(typeof(PeriodicTimer));
+                this.PeriodicTimer = this.CreateActor(typeof(PeriodicTimer), $"PeriodicTimer{this.ServerId}");
                 this.SendEvent(this.PeriodicTimer, new PeriodicTimer.ConfigureEvent(this.Id));
 
                 this.RaiseEvent(new BecomeFollower());
@@ -434,16 +455,14 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
             [OnEventDoAction(typeof(VoteResponse), nameof(RespondVoteAsFollower))]
             [OnEventDoAction(typeof(AppendEntriesRequest), nameof(AppendEntriesAsFollower))]
             [OnEventDoAction(typeof(AppendEntriesResponse), nameof(RespondAppendEntriesAsFollower))]
-            [OnEventDoAction(typeof(ElectionTimer.Timeout), nameof(StartLeaderElection))]
+            [OnEventDoAction(typeof(ElectionTimer.TimeoutEvent), nameof(StartLeaderElection))]
             [OnEventDoAction(typeof(ShutDown), nameof(ShuttingDown))]
             [OnEventGotoState(typeof(BecomeFollower), typeof(Follower))]
             [OnEventGotoState(typeof(BecomeCandidate), typeof(Candidate))]
-            [IgnoreEvents(typeof(PeriodicTimer.Timeout))]
-            private class Follower : State
-            {
-            }
+            [IgnoreEvents(typeof(PeriodicTimer.TimeoutEvent))]
+            class Follower : State { }
 
-            private void FollowerOnInit()
+            void FollowerOnInit()
             {
                 this.LeaderId = null;
                 this.VotesReceived = 0;
@@ -451,7 +470,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 this.SendEvent(this.ElectionTimer, new ElectionTimer.StartTimerEvent());
             }
 
-            private void RedirectClientRequest(Event e)
+            void RedirectClientRequest(Event e)
             {
                 if (this.LeaderId != null)
                 {
@@ -463,12 +482,12 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            private void StartLeaderElection()
+            void StartLeaderElection()
             {
                 this.RaiseEvent(new BecomeCandidate());
             }
 
-            private void VoteAsFollower(Event e)
+            void VoteAsFollower(Event e)
             {
                 var request = e as VoteRequest;
                 if (request.Term > this.CurrentTerm)
@@ -480,7 +499,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 this.Vote(e as VoteRequest);
             }
 
-            private void RespondVoteAsFollower(Event e)
+            void RespondVoteAsFollower(Event e)
             {
                 var request = e as VoteResponse;
                 if (request.Term > this.CurrentTerm)
@@ -490,7 +509,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            private void AppendEntriesAsFollower(Event e)
+            void AppendEntriesAsFollower(Event e)
             {
                 var request = e as AppendEntriesRequest;
                 if (request.Term > this.CurrentTerm)
@@ -502,7 +521,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 this.AppendEntries(e as AppendEntriesRequest);
             }
 
-            private void RespondAppendEntriesAsFollower(Event e)
+            void RespondAppendEntriesAsFollower(Event e)
             {
                 var request = e as AppendEntriesResponse;
                 if (request.Term > this.CurrentTerm)
@@ -518,17 +537,15 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
             [OnEventDoAction(typeof(VoteResponse), nameof(RespondVoteAsCandidate))]
             [OnEventDoAction(typeof(AppendEntriesRequest), nameof(AppendEntriesAsCandidate))]
             [OnEventDoAction(typeof(AppendEntriesResponse), nameof(RespondAppendEntriesAsCandidate))]
-            [OnEventDoAction(typeof(ElectionTimer.Timeout), nameof(StartLeaderElection))]
-            [OnEventDoAction(typeof(PeriodicTimer.Timeout), nameof(BroadcastVoteRequests))]
+            [OnEventDoAction(typeof(ElectionTimer.TimeoutEvent), nameof(StartLeaderElection))]
+            [OnEventDoAction(typeof(PeriodicTimer.TimeoutEvent), nameof(BroadcastVoteRequests))]
             [OnEventDoAction(typeof(ShutDown), nameof(ShuttingDown))]
             [OnEventGotoState(typeof(BecomeLeader), typeof(Leader))]
             [OnEventGotoState(typeof(BecomeFollower), typeof(Follower))]
             [OnEventGotoState(typeof(BecomeCandidate), typeof(Candidate))]
-            private class Candidate : State
-            {
-            }
+            class Candidate : State { }
 
-            private void CandidateOnInit()
+            void CandidateOnInit()
             {
                 this.CurrentTerm++;
                 this.VotedFor = this.Id;
@@ -536,10 +553,13 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
 
                 this.SendEvent(this.ElectionTimer, new ElectionTimer.StartTimerEvent());
 
+                this.Logger.WriteLine("\n [Candidate] " + this.ServerId + " | term " + this.CurrentTerm +
+                    " | election votes " + this.VotesReceived + " | log " + this.Logs.Count + "\n");
+
                 this.BroadcastVoteRequests();
             }
 
-            private void BroadcastVoteRequests()
+            void BroadcastVoteRequests()
             {
                 // BUG: duplicate votes from same follower
                 this.SendEvent(this.PeriodicTimer, new PeriodicTimer.StartTimerEvent());
@@ -547,9 +567,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 for (int idx = 0; idx < this.Servers.Length; idx++)
                 {
                     if (idx == this.ServerId)
-                    {
                         continue;
-                    }
 
                     var lastLogIndex = this.Logs.Count;
                     var lastLogTerm = this.GetLogTermForIndex(lastLogIndex);
@@ -559,7 +577,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            private void VoteAsCandidate(Event e)
+            void VoteAsCandidate(Event e)
             {
                 var request = e as VoteRequest;
                 if (request.Term > this.CurrentTerm)
@@ -575,7 +593,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            private void RespondVoteAsCandidate(Event e)
+            void RespondVoteAsCandidate(Event e)
             {
                 var request = e as VoteResponse;
                 if (request.Term > this.CurrentTerm)
@@ -583,6 +601,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                     this.CurrentTerm = request.Term;
                     this.VotedFor = null;
                     this.RaiseEvent(new BecomeFollower());
+                    return;
                 }
                 else if (request.Term != this.CurrentTerm)
                 {
@@ -594,13 +613,15 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                     this.VotesReceived++;
                     if (this.VotesReceived >= (this.Servers.Length / 2) + 1)
                     {
+                        this.Logger.WriteLine("\n [Leader] " + this.ServerId + " | term " + this.CurrentTerm +
+                            " | election votes " + this.VotesReceived + " | log " + this.Logs.Count + "\n");
                         this.VotesReceived = 0;
                         this.RaiseEvent(new BecomeLeader());
                     }
                 }
             }
 
-            private void AppendEntriesAsCandidate(Event e)
+            void AppendEntriesAsCandidate(Event e)
             {
                 var request = e as AppendEntriesRequest;
                 if (request.Term > this.CurrentTerm)
@@ -616,7 +637,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            private void RespondAppendEntriesAsCandidate(Event e)
+            void RespondAppendEntriesAsCandidate(Event e)
             {
                 var request = e as AppendEntriesResponse;
                 if (request.Term > this.CurrentTerm)
@@ -635,12 +656,10 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
             [OnEventDoAction(typeof(AppendEntriesResponse), nameof(RespondAppendEntriesAsLeader))]
             [OnEventDoAction(typeof(ShutDown), nameof(ShuttingDown))]
             [OnEventGotoState(typeof(BecomeFollower), typeof(Follower))]
-            [IgnoreEvents(typeof(ElectionTimer.Timeout), typeof(PeriodicTimer.Timeout))]
-            private class Leader : State
-            {
-            }
+            [IgnoreEvents(typeof(ElectionTimer.TimeoutEvent), typeof(PeriodicTimer.TimeoutEvent))]
+            class Leader : State { }
 
-            private void LeaderOnInit()
+            void LeaderOnInit()
             {
                 this.Monitor<SafetyMonitor>(new SafetyMonitor.NotifyLeaderElected(this.CurrentTerm));
                 this.SendEvent(this.ClusterManager, new ClusterManager.NotifyLeaderUpdate(this.Id, this.CurrentTerm));
@@ -653,10 +672,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 for (int idx = 0; idx < this.Servers.Length; idx++)
                 {
                     if (idx == this.ServerId)
-                    {
                         continue;
-                    }
-
                     this.NextIndex.Add(this.Servers[idx], logIndex + 1);
                     this.MatchIndex.Add(this.Servers[idx], 0);
                 }
@@ -664,16 +680,13 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 for (int idx = 0; idx < this.Servers.Length; idx++)
                 {
                     if (idx == this.ServerId)
-                    {
                         continue;
-                    }
-
                     this.SendEvent(this.Servers[idx], new AppendEntriesRequest(this.CurrentTerm, this.Id,
                         logIndex, logTerm, new List<Log>(), this.CommitIndex, null));
                 }
             }
 
-            private void ProcessClientRequest(Event e)
+            void ProcessClientRequest(Event e)
             {
                 this.LastClientRequest = e as Client.Request;
 
@@ -683,25 +696,25 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 this.BroadcastLastClientRequest();
             }
 
-            private void BroadcastLastClientRequest()
+            void BroadcastLastClientRequest()
             {
+                this.Logger.WriteLine("\n [Leader] " + this.ServerId + " sends append requests | term " +
+                    this.CurrentTerm + " | log " + this.Logs.Count + "\n");
+
                 var lastLogIndex = this.Logs.Count;
 
                 this.VotesReceived = 1;
                 for (int idx = 0; idx < this.Servers.Length; idx++)
                 {
                     if (idx == this.ServerId)
-                    {
                         continue;
-                    }
 
                     var server = this.Servers[idx];
                     if (lastLogIndex < this.NextIndex[server])
-                    {
                         continue;
-                    }
 
-                    var logs = this.Logs.GetRange(this.NextIndex[server] - 1, this.Logs.Count - (this.NextIndex[server] - 1));
+                    var logs = this.Logs.GetRange(this.NextIndex[server] - 1,
+                        this.Logs.Count - (this.NextIndex[server] - 1));
 
                     var prevLogIndex = this.NextIndex[server] - 1;
                     var prevLogTerm = this.GetLogTermForIndex(prevLogIndex);
@@ -711,7 +724,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            private void VoteAsLeader(Event e)
+            void VoteAsLeader(Event e)
             {
                 var request = e as VoteRequest;
 
@@ -731,7 +744,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            private void RespondVoteAsLeader(Event e)
+            void RespondVoteAsLeader(Event e)
             {
                 var request = e as VoteResponse;
                 if (request.Term > this.CurrentTerm)
@@ -744,7 +757,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            private void AppendEntriesAsLeader(Event e)
+            void AppendEntriesAsLeader(Event e)
             {
                 var request = e as AppendEntriesRequest;
                 if (request.Term > this.CurrentTerm)
@@ -759,7 +772,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            private void RespondAppendEntriesAsLeader(Event e)
+            void RespondAppendEntriesAsLeader(Event e)
             {
                 var request = e as AppendEntriesResponse;
                 if (request.Term > this.CurrentTerm)
@@ -769,6 +782,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
 
                     this.RedirectLastClientRequestToClusterManager();
                     this.RaiseEvent(new BecomeFollower());
+                    return;
                 }
                 else if (request.Term != this.CurrentTerm)
                 {
@@ -784,11 +798,17 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                     if (request.ReceiverEndpoint != null &&
                         this.VotesReceived >= (this.Servers.Length / 2) + 1)
                     {
+                        this.Logger.WriteLine("\n [Leader] " + this.ServerId + " | term " + this.CurrentTerm +
+                            " | append votes " + this.VotesReceived + " | append success\n");
+
                         var commitIndex = this.MatchIndex[request.Server];
                         if (commitIndex > this.CommitIndex &&
                             this.Logs[commitIndex - 1].Term == this.CurrentTerm)
                         {
                             this.CommitIndex = commitIndex;
+
+                            this.Logger.WriteLine("\n [Leader] " + this.ServerId + " | term " + this.CurrentTerm +
+                                " | log " + this.Logs.Count + " | command " + this.Logs[commitIndex - 1].Command + "\n");
                         }
 
                         this.VotesReceived = 0;
@@ -804,10 +824,15 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                         this.NextIndex[request.Server] = this.NextIndex[request.Server] - 1;
                     }
 
-                    var logs = this.Logs.GetRange(this.NextIndex[request.Server] - 1, this.Logs.Count - (this.NextIndex[request.Server] - 1));
+                    var logs = this.Logs.GetRange(this.NextIndex[request.Server] - 1,
+                        this.Logs.Count - (this.NextIndex[request.Server] - 1));
 
                     var prevLogIndex = this.NextIndex[request.Server] - 1;
                     var prevLogTerm = this.GetLogTermForIndex(prevLogIndex);
+
+                    this.Logger.WriteLine("\n [Leader] " + this.ServerId + " | term " + this.CurrentTerm + " | log " +
+                        this.Logs.Count + " | append votes " + this.VotesReceived +
+                        " | append fail (next idx = " + this.NextIndex[request.Server] + ")\n");
 
                     this.SendEvent(request.Server, new AppendEntriesRequest(this.CurrentTerm, this.Id, prevLogIndex,
                         prevLogTerm, logs, this.CommitIndex, request.ReceiverEndpoint));
@@ -817,8 +842,8 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
             /// <summary>
             /// Processes the given vote request.
             /// </summary>
-            /// <param name="request">VoteRequest.</param>
-            private void Vote(VoteRequest request)
+            /// <param name="request">VoteRequest</param>
+            void Vote(VoteRequest request)
             {
                 var lastLogIndex = this.Logs.Count;
                 var lastLogTerm = this.GetLogTermForIndex(lastLogIndex);
@@ -828,10 +853,15 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                     lastLogIndex > request.LastLogIndex ||
                     lastLogTerm > request.LastLogTerm)
                 {
+                    this.Logger.WriteLine("\n [Server] " + this.ServerId + " | term " + this.CurrentTerm +
+                        " | log " + this.Logs.Count + " | vote false\n");
                     this.SendEvent(request.CandidateId, new VoteResponse(this.CurrentTerm, false));
                 }
                 else
                 {
+                    this.Logger.WriteLine("\n [Server] " + this.ServerId + " | term " + this.CurrentTerm +
+                        " | log " + this.Logs.Count + " | vote true\n");
+
                     this.VotedFor = request.CandidateId;
                     this.LeaderId = null;
 
@@ -842,11 +872,14 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
             /// <summary>
             /// Processes the given append entries request.
             /// </summary>
-            /// <param name="request">AppendEntriesRequest.</param>
-            private void AppendEntries(AppendEntriesRequest request)
+            /// <param name="request">AppendEntriesRequest</param>
+            void AppendEntries(AppendEntriesRequest request)
             {
                 if (request.Term < this.CurrentTerm)
                 {
+                    this.Logger.WriteLine("\n [Server] " + this.ServerId + " | term " + this.CurrentTerm + " | log " +
+                        this.Logs.Count + " | last applied: " + this.LastApplied + " | append false (< term)\n");
+
                     this.SendEvent(request.LeaderId, new AppendEntriesResponse(this.CurrentTerm, false,
                         this.Id, request.ReceiverEndpoint));
                 }
@@ -856,7 +889,11 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                         (this.Logs.Count < request.PrevLogIndex ||
                         this.Logs[request.PrevLogIndex - 1].Term != request.PrevLogTerm))
                     {
-                        this.SendEvent(request.LeaderId, new AppendEntriesResponse(this.CurrentTerm, false, this.Id, request.ReceiverEndpoint));
+                        this.Logger.WriteLine("\n [Server] " + this.ServerId + " | term " + this.CurrentTerm + " | log " +
+                            this.Logs.Count + " | last applied: " + this.LastApplied + " | append false (not in log)\n");
+
+                        this.SendEvent(request.LeaderId, new AppendEntriesResponse(this.CurrentTerm,
+                            false, this.Id, request.ReceiverEndpoint));
                     }
                     else
                     {
@@ -894,13 +931,18 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                             this.LastApplied++;
                         }
 
+                        this.Logger.WriteLine("\n [Server] " + this.ServerId + " | term " + this.CurrentTerm + " | log " +
+                            this.Logs.Count + " | entries received " + request.Entries.Count + " | last applied " +
+                            this.LastApplied + " | append true\n");
+
                         this.LeaderId = request.LeaderId;
-                        this.SendEvent(request.LeaderId, new AppendEntriesResponse(this.CurrentTerm, true, this.Id, request.ReceiverEndpoint));
+                        this.SendEvent(request.LeaderId, new AppendEntriesResponse(this.CurrentTerm,
+                            true, this.Id, request.ReceiverEndpoint));
                     }
                 }
             }
 
-            private void RedirectLastClientRequestToClusterManager()
+            void RedirectLastClientRequestToClusterManager()
             {
                 if (this.LastClientRequest != null)
                 {
@@ -911,9 +953,9 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
             /// <summary>
             /// Returns the log term for the given log index.
             /// </summary>
-            /// <param name="logIndex">Index.</param>
-            /// <returns>Term.</returns>
-            private int GetLogTermForIndex(int logIndex)
+            /// <param name="logIndex">Index</param>
+            /// <returns>Term</returns>
+            int GetLogTermForIndex(int logIndex)
             {
                 var logTerm = 0;
                 if (logIndex > 0)
@@ -924,16 +966,18 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 return logTerm;
             }
 
-            private void ShuttingDown()
+            void ShuttingDown()
             {
                 this.SendEvent(this.ElectionTimer, HaltEvent.Instance);
                 this.SendEvent(this.PeriodicTimer, HaltEvent.Instance);
-                this.RaiseHaltEvent();
+
+                this.RaiseEvent(HaltEvent.Instance);
             }
         }
 
         private class Client : StateMachine
         {
+
             /// <summary>
             /// Used to configure the client.
             /// </summary>
@@ -964,34 +1008,28 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            internal class Response : Event
-            {
-            }
+            internal class Response : Event { }
 
-            private class LocalEvent : Event
-            {
-            }
+            private class LocalEvent : Event { }
 
-            private ActorId Cluster;
+            ActorId Cluster;
 
-            private int LatestCommand;
-            private int Counter;
+            int LatestCommand;
+            int Counter;
 
             [Start]
             [OnEntry(nameof(InitOnEntry))]
-            [OnEventDoAction(typeof(ConfigureEvent), nameof(SetupEvent))]
+            [OnEventDoAction(typeof(ConfigureEvent), nameof(Configure))]
             [OnEventGotoState(typeof(LocalEvent), typeof(PumpRequest))]
-            private class Init : State
-            {
-            }
+            class Init : State { }
 
-            private void InitOnEntry()
+            void InitOnEntry()
             {
                 this.LatestCommand = -1;
                 this.Counter = 0;
             }
 
-            private void SetupEvent(Event e)
+            void Configure(Event e)
             {
                 this.Cluster = (e as ConfigureEvent).Cluster;
                 this.RaiseEvent(new LocalEvent());
@@ -1000,23 +1038,24 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
             [OnEntry(nameof(PumpRequestOnEntry))]
             [OnEventDoAction(typeof(Response), nameof(ProcessResponse))]
             [OnEventGotoState(typeof(LocalEvent), typeof(PumpRequest))]
-            private class PumpRequest : State
-            {
-            }
+            class PumpRequest : State { }
 
-            private void PumpRequestOnEntry()
+            void PumpRequestOnEntry()
             {
-                this.LatestCommand = this.RandomInteger(100);
+                this.LatestCommand = this.RandomInteger(5); //new Random().Next(100);
                 this.Counter++;
+
+                this.Logger.WriteLine("\n [Client] new request " + this.LatestCommand + "\n");
+
                 this.SendEvent(this.Cluster, new Request(this.Id, this.LatestCommand));
             }
 
-            private void ProcessResponse()
+            void ProcessResponse()
             {
-                if (this.Counter is 3)
+                if (this.Counter == 1)
                 {
                     this.SendEvent(this.Cluster, new ClusterManager.ShutDown());
-                    this.RaiseHaltEvent();
+                    this.RaiseEvent(HaltEvent.Instance);
                 }
                 else
                 {
@@ -1038,64 +1077,68 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            internal class StartTimerEvent : Event
-            {
-            }
+            internal class StartTimerEvent : Event { }
+            internal class CancelTimerEvent : Event { }
+            internal class TimeoutEvent : Event { }
 
-            internal class CancelTimer : Event
-            {
-            }
+            private class TickEvent : Event { }
 
-            internal class Timeout : Event
-            {
-            }
-
-            private class TickEvent : Event
-            {
-            }
-
-            private ActorId Target;
+            ActorId Target;
+            int Counter;
 
             [Start]
-            [OnEventDoAction(typeof(ConfigureEvent), nameof(SetupEvent))]
+            [OnEventDoAction(typeof(ConfigureEvent), nameof(Configure))]
             [OnEventGotoState(typeof(StartTimerEvent), typeof(Active))]
-            private class Init : State
-            {
-            }
+            class Init : State { }
 
-            private void SetupEvent(Event e)
+            void Configure(Event e)
             {
                 this.Target = (e as ConfigureEvent).Target;
+                this.Counter = 0;
+                //this.RaiseEvent(new StartTimerEvent());
             }
 
             [OnEntry(nameof(ActiveOnEntry))]
             [OnEventDoAction(typeof(TickEvent), nameof(Tick))]
-            [OnEventGotoState(typeof(CancelTimer), typeof(Inactive))]
+            [OnEventGotoState(typeof(CancelTimerEvent), typeof(Inactive))]
             [IgnoreEvents(typeof(StartTimerEvent))]
-            private class Active : State
-            {
-            }
+            class Active : State { }
 
-            private void ActiveOnEntry()
+            void ActiveOnEntry()
             {
                 this.SendEvent(this.Id, new TickEvent());
             }
 
-            private void Tick()
+            void Tick()
             {
                 if (this.RandomBoolean())
                 {
-                    this.SendEvent(this.Target, new Timeout());
+                    this.Counter++;
                 }
 
-                this.RaiseEvent(new CancelTimer());
+                if (this.Counter == LeaderElectionDepth)
+                {
+                    this.Logger.WriteLine("\n [ElectionTimer] " + this.Target + " | timed out\n");
+                    this.SendEvent(this.Target, new TimeoutEvent());
+                    this.Counter = 0;
+                }
+
+                if (this.RandomBoolean())
+                {
+                    this.SendEvent(this.Id, new TickEvent());
+                }
+                else
+                {
+                    this.RaiseEvent(new CancelTimerEvent());
+                }
+
+                //this.SendEvent(this.Id, new TickEvent());
+                //this.RaiseEvent(new CancelTimerEvent());
             }
 
             [OnEventGotoState(typeof(StartTimerEvent), typeof(Active))]
-            [IgnoreEvents(typeof(CancelTimer), typeof(TickEvent))]
-            private class Inactive : State
-            {
-            }
+            [IgnoreEvents(typeof(CancelTimerEvent), typeof(TickEvent))]
+            class Inactive : State { }
         }
 
         private class PeriodicTimer : StateMachine
@@ -1111,64 +1154,51 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            internal class StartTimerEvent : Event
-            {
-            }
+            internal class StartTimerEvent : Event { }
+            internal class CancelTimerEvent : Event { }
+            internal class TimeoutEvent : Event { }
 
-            internal class CancelTimer : Event
-            {
-            }
+            private class TickEvent : Event { }
 
-            internal class Timeout : Event
-            {
-            }
-
-            private class TickEvent : Event
-            {
-            }
-
-            private ActorId Target;
+            ActorId Target;
 
             [Start]
-            [OnEventDoAction(typeof(ConfigureEvent), nameof(SetupEvent))]
+            [OnEventDoAction(typeof(ConfigureEvent), nameof(Configure))]
             [OnEventGotoState(typeof(StartTimerEvent), typeof(Active))]
-            private class Init : State
-            {
-            }
+            class Init : State { }
 
-            private void SetupEvent(Event e)
+            void Configure(Event e)
             {
                 this.Target = (e as ConfigureEvent).Target;
+                //this.RaiseEvent(new StartTimerEvent());
             }
 
             [OnEntry(nameof(ActiveOnEntry))]
             [OnEventDoAction(typeof(TickEvent), nameof(Tick))]
-            [OnEventGotoState(typeof(CancelTimer), typeof(Inactive))]
+            [OnEventGotoState(typeof(CancelTimerEvent), typeof(Inactive))]
             [IgnoreEvents(typeof(StartTimerEvent))]
-            private class Active : State
-            {
-            }
+            class Active : State { }
 
-            private void ActiveOnEntry()
+            void ActiveOnEntry()
             {
                 this.SendEvent(this.Id, new TickEvent());
             }
 
-            private void Tick()
+            void Tick()
             {
                 if (this.RandomBoolean())
                 {
-                    this.SendEvent(this.Target, new Timeout());
+                    this.Logger.WriteLine("\n [PeriodicTimer] " + this.Target + " | timed out\n");
+                    this.SendEvent(this.Target, new TimeoutEvent());
                 }
 
-                this.RaiseEvent(new CancelTimer());
+                this.SendEvent(this.Id, new TickEvent());
+                //this.RaiseEvent(new CancelTimerEvent());
             }
 
             [OnEventGotoState(typeof(StartTimerEvent), typeof(Active))]
-            [IgnoreEvents(typeof(CancelTimer), typeof(TickEvent))]
-            private class Inactive : State
-            {
-            }
+            [IgnoreEvents(typeof(CancelTimerEvent), typeof(TickEvent))]
+            class Inactive : State { }
         }
 
         private class SafetyMonitor : Monitor
@@ -1184,74 +1214,58 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 }
             }
 
-            private class LocalEvent : Event
-            {
-            }
+            private class LocalEvent : Event { }
 
+            //unused: private int CurrentTerm;
             private HashSet<int> TermsWithLeader;
 
             [Start]
             [OnEntry(nameof(InitOnEntry))]
             [OnEventGotoState(typeof(LocalEvent), typeof(Monitoring))]
-            private class Init : State
-            {
-            }
+            class Init : State { }
 
-            private void InitOnEntry()
+            void InitOnEntry()
             {
+                //this.CurrentTerm = -1;
                 this.TermsWithLeader = new HashSet<int>();
                 this.RaiseEvent(new LocalEvent());
             }
 
             [OnEventDoAction(typeof(NotifyLeaderElected), nameof(ProcessLeaderElected))]
-            private class Monitoring : State
-            {
-            }
+            class Monitoring : State { }
 
-            private void ProcessLeaderElected(Event e)
+            void ProcessLeaderElected(Event e)
             {
                 var term = (e as NotifyLeaderElected).Term;
-                this.Assert(!this.TermsWithLeader.Contains(term), $"Detected more than one leader.");
+
+                this.Assert(!this.TermsWithLeader.Contains(term), "Detected more than one leader in term " + term);
                 this.TermsWithLeader.Add(term);
             }
         }
+    }
 
-        [Theory(Timeout = 10000)]
-        [InlineData(361)]
-        public void TestMultipleLeadersInRaftProtocol(uint seed)
+    public class Raft
+    {
+        static void Main(string[] args)
         {
-            var configuration = GetConfiguration();
-            configuration.MaxUnfairSchedulingSteps = 100;
-            configuration.MaxFairSchedulingSteps = 1000;
-            configuration.LivenessTemperatureThreshold = 500;
-            configuration.RandomGeneratorSeed = seed;
-            configuration.TestingIterations = 1;
-
-            this.TestWithError(r =>
-            {
-                r.RegisterMonitor<SafetyMonitor>();
-                r.CreateActor(typeof(ClusterManager));
-            },
-            configuration: configuration,
-            expectedError: "Detected more than one leader.",
-            replay: true);
+            Console.WriteLine("Hello World!");
         }
 
-        [Fact(Timeout = 5000)]
-        public void TestMultipleLeadersInRaftProtocol2()
+        [Microsoft.Coyote.SystematicTesting.TestAttribute]
+        public static void TestRaft()
         {
-            var configuration = GetConfiguration();
-            // configuration.MaxUnfairSchedulingSteps = 100;
-            // configuration.MaxFairSchedulingSteps = 1000;
-            // configuration.LivenessTemperatureThreshold = 500;
-            configuration.TestingIterations = 1000;
+            // CoyoteRuntime.Current.
+            // TestFib tf = new TestFib(1, 1, 11);
+            // await tf.TestRun();
 
-            this.Test(r =>
-            {
-                r.RegisterMonitor<SafetyMonitor>();
-                r.CreateActor(typeof(ClusterManager));
-            },
-            configuration: GetConfiguration().WithQLearningStrategy());
+            var configuration = Configuration.Create().WithQLearningStrategy();
+
+            // Creates a new P# runtime instance, and passes an optional configuration.
+            // var runtime = Microsoft.Coyote.Actors.RuntimeFactory.Create(configuration);
+
+            var runtime = Microsoft.Coyote.Actors.RuntimeFactory.Create(configuration);
+
+            RaftTest.Execute(runtime, 4);
         }
     }
 }

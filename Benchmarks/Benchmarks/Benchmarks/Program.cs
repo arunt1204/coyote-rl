@@ -1,6 +1,7 @@
 ﻿using Microsoft.Coyote.Actors;
 using Microsoft.Coyote.Tasks;
 using System;
+using System.Collections.Generic;
 
 namespace Benchmarks
 {
@@ -74,6 +75,20 @@ namespace Benchmarks
         {
             SafeStack ss = new SafeStack();
             await ss.Run(runtime);
+        }
+
+        [Microsoft.Coyote.SystematicTesting.Test]
+        public static void Test_BoundedBuffer()
+        {
+            BoundedBuffer buffer = new BoundedBuffer(false);
+            var tasks = new List<Task>
+                {
+                    Task.Run(() => BoundedBuffer.Reader(buffer)),
+                    Task.Run(() => BoundedBuffer.Reader(buffer)),
+                    Task.Run(() => BoundedBuffer.Writer(buffer))
+                };
+
+            Task.WaitAll(tasks.ToArray());
         }
     }
 }

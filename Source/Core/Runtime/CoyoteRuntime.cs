@@ -409,7 +409,7 @@ namespace Microsoft.Coyote.Runtime
             IO.Debug.WriteLine("<CreateLog> Operation '{0}' was created to execute task '{1}'.", op.Name, task.Id);
             task.Start();
             this.Scheduler.WaitOperationStart(op);
-            this.Scheduler.ScheduleNextOperation();
+            this.Scheduler.ScheduleNextOperation(AsyncOperationType.Create);
             this.TaskMap.TryAdd(tcs.Task, op);
             return tcs.Task;
         }
@@ -481,7 +481,7 @@ namespace Microsoft.Coyote.Runtime
                 // Set the result task completion source to notify to the awaiters that the operation
                 // has been completed, and schedule the next enabled operation.
                 SetTaskCompletionSource(context.ResultSource, null, exception, default);
-                this.Scheduler.ScheduleNextOperation();
+                this.Scheduler.ScheduleNextOperation(AsyncOperationType.Join);
             }
         }
 
@@ -605,7 +605,7 @@ namespace Microsoft.Coyote.Runtime
                 // Set the result task completion source to notify to the awaiters that the operation
                 // has been completed, and schedule the next enabled operation.
                 SetTaskCompletionSource(context.ResultSource, result, exception, default);
-                this.Scheduler.ScheduleNextOperation();
+                this.Scheduler.ScheduleNextOperation(AsyncOperationType.Join);
             }
 
             return result;
@@ -1261,7 +1261,7 @@ namespace Microsoft.Coyote.Runtime
 #if !DEBUG
         [DebuggerStepThrough]
 #endif
-        internal void OnYieldAwaiterGetResult() => this.Scheduler.ScheduleNextOperation();
+        internal void OnYieldAwaiterGetResult() => this.Scheduler.ScheduleNextOperation(AsyncOperationType.Yield);
 
         /// <summary>
         /// Callback invoked when the executing operation is waiting for the specified task to complete.
@@ -1473,12 +1473,12 @@ namespace Microsoft.Coyote.Runtime
         /// Schedules the next controlled asynchronous operation. This method
         /// is only used during testing.
         /// </summary>
-        internal void ScheduleNextOperation(AsyncOperationType type = AsyncOperationType.Default, bool isYielding = false)
+        internal void ScheduleNextOperation(AsyncOperationType type = AsyncOperationType.Default, bool isYielding = false, int[] hashArray = null)
         {
             var callerOp = this.Scheduler.GetExecutingOperation<AsyncOperation>();
             if (callerOp != null)
             {
-                this.Scheduler.ScheduleNextOperation(type, isYielding);
+                this.Scheduler.ScheduleNextOperation(type, isYielding, hashArray);
             }
         }
 
@@ -1505,7 +1505,7 @@ namespace Microsoft.Coyote.Runtime
         /// level of abstraction. The hash is updated in each execution step.
         /// </summary>
         [DebuggerStepThrough]
-        internal int GetProgramState(string abstractionLevel)
+        internal int GetProgramState(string abstractionLevel, int[] hashArray = null)
         {
             unchecked
             {
@@ -1532,21 +1532,6 @@ namespace Microsoft.Coyote.Runtime
                     }
 
                     hash = hash + this.SpecificationEngine.GetHashedMonitorState();
-
-                    /* foreach (var asyncLock in CoyoteTasks.AsyncLock.Locks)
-                    {
-                       hash = (hash * 397) + asyncLock.GetHashedState(abstractionLevel);
-                    }
-
-                    foreach (var syncBlock in CoyoteTasks.SynchronizedBlock.SynchronizedBlocks)
-                    {
-                        hash = (hash * 397) + syncBlock.GetHashedState(abstractionLevel);
-                    }
-
-                    foreach (var semaph in CoyoteTasks.Semaphore.Semaphores)
-                    {
-                        hash = (hash * 397) + semaph.GetHashedState(abstractionLevel);
-                    } */
                 }
                 else if (abstractionLevel is "inbox-only" ||
                     abstractionLevel is "custom-only")
@@ -1562,6 +1547,22 @@ namespace Microsoft.Coyote.Runtime
                     }
 
                     hash = hash + this.SpecificationEngine.GetHashedMonitorState();
+                }
+
+                if (hashArray != null)
+                {
+                    if (abstractionLevel is "default")
+                    {
+                        hash = (hash * 397) + hashArray[0];
+                    }
+                    else if (abstractionLevel is "custom")
+                    {
+                        hash = (hash * 397) + hashArray[1];
+                    }
+                    else if (abstractionLevel is "custom-only")
+                    {
+                        hash = (hash * 397) + hashArray[2];
+                    }
                 }
 
                 return hash;

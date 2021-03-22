@@ -7,9 +7,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace FailureDetectorTests
+namespace Benchmarks
 {
-    public class FailureDetectorTest
+    public class FailureDetector
     {
         public static void Execute(IActorRuntime runtime)
         {
@@ -459,8 +459,7 @@ namespace FailureDetectorTests
 
             [IgnoreEvents(typeof(StartTimerEvent))]
             [OnEventGotoState(typeof(CancelTimerEvent), typeof(WaitForReq), nameof(CancelTimerAction2))]
-            // [OnEventGotoState(typeof(Default), typeof(WaitForReq), nameof(DefaultAction))]
-            [OnEventGotoState(typeof(Init), typeof(WaitForReq), nameof(DefaultAction))]
+            [OnEventGotoState(typeof(DefaultEvent), typeof(WaitForReq), nameof(DefaultAction))]
             private class WaitForCancel : State
             {
             }
@@ -572,29 +571,6 @@ namespace FailureDetectorTests
                 // this.Assert(this.Pending[node] > 0, $"Violation in safety monitor.");
                 this.Pending[node] = this.Pending[node] - 1;
             }
-        }
-    }
-
-    public class FailureDetector
-    {
-        static void Main(string[] args)
-        {
-            Console.WriteLine("Hello World!");
-        }
-
-        [Microsoft.Coyote.SystematicTesting.TestAttribute]
-        public static void TestFD()
-        {
-            // CoyoteRuntime.Current.
-            // TestFib tf = new TestFib(1, 1, 11);
-            // await tf.TestRun();
-
-            var configuration = Configuration.Create().WithQLearningStrategy();
-
-            // Creates a new P# runtime instance, and passes an optional configuration.
-            var runtime = Microsoft.Coyote.Actors.RuntimeFactory.Create(configuration);
-
-            FailureDetectorTest.Execute(runtime);
         }
     }
 }

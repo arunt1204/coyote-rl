@@ -7,9 +7,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace ChordTests
+namespace Benchmarks
 {
-    public class ChordTest
+    public class Chord
     {
         public static void Execute(IActorRuntime runtime)
         {
@@ -845,29 +845,6 @@ namespace ChordTests
             [Hot]
             [OnEventGotoState(typeof(NotifyClientResponse), typeof(Responded))]
             class Requested : State { }
-        }
-    }
-
-    public class Chord
-    {
-        static void Main(string[] args)
-        {
-            Console.WriteLine("Hello World!");
-        }
-
-        [Microsoft.Coyote.SystematicTesting.TestAttribute]
-        public static void TestChord()
-        {
-            // CoyoteRuntime.Current.
-            // TestFib tf = new TestFib(1, 1, 11);
-            // await tf.TestRun();
-
-            var configuration = Configuration.Create().WithQLearningStrategy();
-
-            // Creates a new P# runtime instance, and passes an optional configuration.
-            var runtime = Microsoft.Coyote.Actors.RuntimeFactory.Create(configuration);
-
-            ChordTest.Execute(runtime);
         }
     }
 }

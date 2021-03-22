@@ -848,22 +848,5 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
             expectedError: "LivenessMonitor detected potential liveness bug in hot state 'Requested'.",
             replay: true);
         }
-
-        [Fact(Timeout = 5000)]
-        public void TestLivenessBugInChordProtocol2()
-        {
-            var configuration = GetConfiguration();
-            configuration.MaxUnfairSchedulingSteps = 200;
-            configuration.MaxFairSchedulingSteps = 2000;
-            configuration.LivenessTemperatureThreshold = 1000;
-            configuration.TestingIterations = 10000;
-
-            this.Test(r =>
-            {
-                r.RegisterMonitor<LivenessMonitor>();
-                r.CreateActor(typeof(ClusterManager));
-            },
-            configuration: GetConfiguration().WithQLearningStrategy());
-        }
     }
 }

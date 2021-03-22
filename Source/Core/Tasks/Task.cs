@@ -718,7 +718,7 @@ namespace Microsoft.Coyote.Tasks
         {
             if (CoyoteRuntime.IsExecutionControlled)
             {
-                CoyoteRuntime.Current.ScheduleNextOperation();
+                CoyoteRuntime.Current.ScheduleNextOperation(AsyncOperationType.Yield);
             }
         }
 

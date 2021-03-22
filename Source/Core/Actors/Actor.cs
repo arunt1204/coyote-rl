@@ -761,8 +761,10 @@ namespace Microsoft.Coyote.Actors
                 {
                     hash = (hash * 397) + this.GetType().GetHashCode();
                     hash = (hash * 397) + this.IsHalted.GetHashCode();
-                    // hash = (hash * 397) + this.Manager.GetCachedState();
-                    hash = (hash * 397) + this.Id.Value.GetHashCode();
+
+                    hash = (hash * 31) + this.Id.Value.GetHashCode();
+                    hash = (hash * 397) + this.IsEventHandlerRunning.GetHashCode();
+                    hash = (hash * 397) + this.Context.GetActorProgramCounter(this.Id);
 
                     hash = (hash * 397) + this.Inbox.GetCachedState();
                 }
@@ -780,18 +782,8 @@ namespace Microsoft.Coyote.Actors
                         hash = (hash * 397) + this.HashedState;
                     }
                 }
-                else if (abstractionLevel is "full")
+                else if (abstractionLevel is "custom-only")
                 {
-                    hash = (hash * 397) + this.GetType().GetHashCode();
-                    hash = (hash * 397) + this.IsHalted.GetHashCode();
-                    // hash = (hash * 397) + this.Manager.GetCachedState();
-
-                    hash = (hash * 31) + this.Id.Value.GetHashCode();
-                    hash = (hash * 397) + this.IsEventHandlerRunning.GetHashCode();
-                    hash = (hash * 397) + this.Context.GetActorProgramCounter(this.Id);
-
-                    hash = (hash * 397) + this.Inbox.GetCachedState();
-
                     if (this.HashedState != 0)
                     {
                         // Adds the user-defined hashed machine state.

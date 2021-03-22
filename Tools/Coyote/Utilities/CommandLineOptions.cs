@@ -56,6 +56,7 @@ You can provide one or two unsigned integer values", typeof(uint)).IsMultiValue 
             testingGroup.AddArgument("sch-pct", null, "Choose the PCT scheduling strategy with given maximum number of priority switch points", typeof(uint));
             testingGroup.AddArgument("sch-fairpct", null, "Choose the fair PCT scheduling strategy with given maximum number of priority switch points", typeof(uint));
             testingGroup.AddArgument("sch-portfolio", null, "Choose the portfolio scheduling strategy", typeof(bool));
+            testingGroup.AddArgument("abstraction-level", null, "Choose the portfolio scheduling strategy", typeof(string));
 
             var replayOptions = this.Parser.GetOrCreateGroup("replayOptions", "Replay options");
             replayOptions.DependsOn = new CommandLineArgumentDependency() { Name = "command", Value = "replay" };
@@ -469,7 +470,7 @@ You can provide one or two unsigned integer values", typeof(uint)).IsMultiValue 
                 configuration.AbstractionLevel != "custom" &&
                 configuration.AbstractionLevel != "custom-only")
             {
-                Error.ReportAndExit("Please provide a supported abstraction level from default, inboxonly, custom or full");
+                Error.ReportAndExit("Please provide a supported abstraction level from default, inboxonly, custom or custom-only");
             }
 
             if (configuration.SafetyPrefixBound > 0 &&

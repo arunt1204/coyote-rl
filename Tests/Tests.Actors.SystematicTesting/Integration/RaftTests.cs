@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 using System.Collections.Generic;
-using Microsoft.Coyote.Runtime;
 using Microsoft.Coyote.Specifications;
 using Xunit;
 using Xunit.Abstractions;
@@ -1235,23 +1234,6 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
             configuration: configuration,
             expectedError: "Detected more than one leader.",
             replay: true);
-        }
-
-        [Fact(Timeout = 5000)]
-        public void TestMultipleLeadersInRaftProtocol2()
-        {
-            var configuration = GetConfiguration();
-            // configuration.MaxUnfairSchedulingSteps = 100;
-            // configuration.MaxFairSchedulingSteps = 1000;
-            // configuration.LivenessTemperatureThreshold = 500;
-            configuration.TestingIterations = 1000;
-
-            this.Test(r =>
-            {
-                r.RegisterMonitor<SafetyMonitor>();
-                r.CreateActor(typeof(ClusterManager));
-            },
-            configuration: GetConfiguration().WithQLearningStrategy());
         }
     }
 }

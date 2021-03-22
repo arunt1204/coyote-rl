@@ -145,10 +145,11 @@ namespace Microsoft.Coyote.SystematicTesting
         /// </summary>
         /// <param name="type">Type of the operation.</param>
         /// <param name="isYielding">True if the current operation is yielding, else false.</param>
+        /// <param name="hashArray">Hash Array for Locls, Semaphore or Synchronized Block.</param>
         /// <remarks>
         /// An enabled operation is one that is not blocked nor completed.
         /// </remarks>
-        internal void ScheduleNextOperation(AsyncOperationType type = AsyncOperationType.Default, bool isYielding = false)
+        internal void ScheduleNextOperation(AsyncOperationType type = AsyncOperationType.Default, bool isYielding = false, int[] hashArray = null)
         {
             lock (this.SyncObject)
             {
@@ -181,10 +182,10 @@ namespace Microsoft.Coyote.SystematicTesting
                     // Update the current operation with the hashed program state.
                     current.HashedProgramState = this.Runtime.GetHashedProgramState();
 
-                    current.DefaultHashedState = this.Runtime.GetProgramState("default");
-                    current.InboxOnlyHashedState = this.Runtime.GetProgramState("inboxonly");
-                    current.CustomHashedState = this.Runtime.GetProgramState("custom");
-                    current.CustomOnlyHashedState = this.Runtime.GetProgramState("custom-only");
+                    current.DefaultHashedState = this.Runtime.GetProgramState("default", hashArray);
+                    current.InboxOnlyHashedState = this.Runtime.GetProgramState("inboxonly", hashArray);
+                    current.CustomHashedState = this.Runtime.GetProgramState("custom", hashArray);
+                    current.CustomOnlyHashedState = this.Runtime.GetProgramState("custom-only", hashArray);
                 }
 
                 // Choose the next operation to schedule, if there is one enabled.

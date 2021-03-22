@@ -26,23 +26,30 @@ namespace Microsoft.Coyote.SystematicTesting
         /// </summary>
         internal AsyncOperationStatus Status;
 
-#pragma warning disable SA1648 // inheritdoc should be used with inheriting class
-        /// <inheritdoc/>
+        /// <summary>
+        /// The type of the operation.
+        /// </summary>
         public AsyncOperationType Type { get; private set; }
 
-        /// <inheritdoc/>
+        /// <summary>
+        /// The default hashed state of the operation.
+        /// </summary>
         public int DefaultHashedState { get; internal set; }
 
-        /// <inheritdoc/>
+        /// <summary>
+        /// The Inbox hash state of the operation.
+        /// </summary>
         public int InboxOnlyHashedState { get; internal set; }
 
-        /// <inheritdoc/>
+        /// <summary>
+        /// The custom hashed state of the operation.
+        /// </summary>
         public int CustomHashedState { get; internal set; }
 
-        /// <inheritdoc/>
+        /// <summary>
+        /// The custom only hashed state of the operation.
+        /// </summary>
         public int CustomOnlyHashedState { get; internal set; }
-
-#pragma warning restore SA1648 // inheritdoc should be used with inheriting class
 
         /// <summary>
         /// A value that represents the hashed program state when

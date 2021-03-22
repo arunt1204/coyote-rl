@@ -1,21 +1,20 @@
-﻿// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-
+﻿using Microsoft.Coyote;
+using Microsoft.Coyote.Actors;
+using Microsoft.Coyote.Runtime;
+using Microsoft.Coyote.Specifications;
+using Microsoft.Coyote.Tasks;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Microsoft.Coyote.Specifications;
-using Microsoft.Coyote.SystematicTesting.Tests;
-using Xunit;
-using Xunit.Abstractions;
 
-namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
+namespace Benchmarks
 {
-    public class PaxosTest : BaseSystematicTest
+    public class Paxos
     {
-        public PaxosTest(ITestOutputHelper output)
-            : base(output)
+        public static void Execute(IActorRuntime runtime)
         {
+            runtime.RegisterMonitor<SafetyMonitor>();
+            runtime.CreateActor(typeof(ClusterManager), new ClusterManagerSetupEvent(runtime));
         }
 
         private class Proposal
@@ -526,7 +525,7 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
                 var proposer = proposalRequest.From;
                 var proposal = proposalRequest.Proposal;
 
-                if ( this.lastAckedProposal == null ||
+                if (this.lastAckedProposal == null ||
                      proposal.GreaterThan(this.lastAckedProposal))
                 {
                     this.lastAckedProposal = proposal;
@@ -660,34 +659,6 @@ namespace Microsoft.Coyote.Actors.SystematicTesting.Tests
             internal class ValueLearned : State
             {
             }
-        }
-
-        [Fact(Timeout = 10000)]
-        public void TestBugInPaxos()
-        {
-            // bug on the runtime
-            var configuration = GetConfiguration();
-            // configuration.MaxUnfairSchedulingSteps = 200;
-            // configuration.MaxFairSchedulingSteps = 2000;
-            // configuration.LivenessTemperatureThreshold = 1000;
-            configuration.TestingIterations = 1000;
-            configuration.WithQLearningStrategy();
-
-            this.Test(r =>
-            {
-                r.RegisterMonitor<SafetyMonitor>();
-                r.CreateActor(typeof(ClusterManager), new ClusterManagerSetupEvent(r));
-            },
-            configuration: configuration);
-
-            /* this.TestWithError(r =>
-            {
-                r.RegisterMonitor<SafetyMonitor>();
-                r.CreateActor(typeof(ClusterManager), new ClusterManagerSetupEvent(r));
-            },
-            configuration: configuration,
-            expectedError: "Conflicting values learned",
-            replay: true); */
         }
     }
 }

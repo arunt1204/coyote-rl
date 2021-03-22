@@ -6,9 +6,9 @@ using Microsoft.Coyote.Tasks;
 using System;
 using System.Collections.Generic;
 
-namespace RaftTests
+namespace Benchmarks
 {
-    public class RaftTest
+    public class Raft
     {
         static private int LeaderElectionDepth;
 
@@ -1241,31 +1241,6 @@ namespace RaftTests
                 this.Assert(!this.TermsWithLeader.Contains(term), "Detected more than one leader in term " + term);
                 this.TermsWithLeader.Add(term);
             }
-        }
-    }
-
-    public class Raft
-    {
-        static void Main(string[] args)
-        {
-            Console.WriteLine("Hello World!");
-        }
-
-        [Microsoft.Coyote.SystematicTesting.TestAttribute]
-        public static void TestRaft()
-        {
-            // CoyoteRuntime.Current.
-            // TestFib tf = new TestFib(1, 1, 11);
-            // await tf.TestRun();
-
-            var configuration = Configuration.Create().WithQLearningStrategy();
-
-            // Creates a new P# runtime instance, and passes an optional configuration.
-            // var runtime = Microsoft.Coyote.Actors.RuntimeFactory.Create(configuration);
-
-            var runtime = Microsoft.Coyote.Actors.RuntimeFactory.Create(configuration);
-
-            RaftTest.Execute(runtime, 4);
         }
     }
 }

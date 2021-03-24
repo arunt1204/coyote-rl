@@ -116,49 +116,57 @@ namespace Benchmarks
                     }
 
                     Task.ExploreContextSwitch();
-                    int headTemp = head;
-                    bool compareExchangeResult = false;
-                    Task.ExploreContextSwitch();
-                    using (await this.HeadLock.AcquireAsync())
+
+                    if (next >= 0)
                     {
-                        if (this.Head == headTemp)
+                        int headTemp = head;
+                        bool compareExchangeResult = false;
+                        Task.ExploreContextSwitch();
+                        using (await this.HeadLock.AcquireAsync())
                         {
-                            this.Head = next;
-                            compareExchangeResult = true;
-                            Runtime.Logger.WriteLine($"Task {id} compare-exchange in pop succeeded (head = {this.Head}, count = {this.Count}).");
-                            Runtime.Monitor<StateMonitor>(new StateMonitor.UpdateStateEvent(this.Array));
+                            if (this.Head == headTemp)
+                            {
+                                this.Head = next;
+                                compareExchangeResult = true;
+                                Runtime.Logger.WriteLine($"Task {id} compare-exchange in pop succeeded (head = {this.Head}, count = {this.Count}).");
+                                Runtime.Monitor<StateMonitor>(new StateMonitor.UpdateStateEvent(this.Array));
+                            }
+                            else
+                            {
+                                headTemp = this.Head;
+                                Runtime.Logger.WriteLine($"Task {id} compare-exchange in pop failed and re-read head {headTemp}.");
+                            }
+                        }
+
+                        if (compareExchangeResult)
+                        {
+                            Task.ExploreContextSwitch();
+                            using (await this.CountLock.AcquireAsync())
+                            {
+                                this.Count--;
+                                Runtime.Monitor<StateMonitor>(new StateMonitor.UpdateStateEvent(this.Array));
+                            }
+
+                            Runtime.Logger.WriteLine($"Task {id} pops {head} (head = {this.Head}, count = {this.Count}).");
+                            Runtime.Logger.WriteLine($"   [0] = {this.Array[0]} | next = {this.Array[0].Next}");
+                            Runtime.Logger.WriteLine($"   [1] = {this.Array[1]} | next = {this.Array[1].Next}");
+                            Runtime.Logger.WriteLine($"   [2] = {this.Array[2]} | next = {this.Array[2].Next}");
+                            Runtime.Logger.WriteLine($"");
+                            return head;
                         }
                         else
                         {
-                            headTemp = this.Head;
-                            Runtime.Logger.WriteLine($"Task {id} compare-exchange in pop failed and re-read head {headTemp}.");
+                            Task.ExploreContextSwitch();
+                            using (await this.ArrayLock.AcquireAsync())
+                            {
+                                this.Array[head].Next = next;
+                                Runtime.Monitor<StateMonitor>(new StateMonitor.UpdateStateEvent(this.Array));
+                            }
                         }
-                    }
-
-                    if (compareExchangeResult)
-                    {
-                        Task.ExploreContextSwitch();
-                        using (await this.CountLock.AcquireAsync())
-                        {
-                            this.Count--;
-                            Runtime.Monitor<StateMonitor>(new StateMonitor.UpdateStateEvent(this.Array));
-                        }
-
-                        Runtime.Logger.WriteLine($"Task {id} pops {head} (head = {this.Head}, count = {this.Count}).");
-                        Runtime.Logger.WriteLine($"   [0] = {this.Array[0]} | next = {this.Array[0].Next}");
-                        Runtime.Logger.WriteLine($"   [1] = {this.Array[1]} | next = {this.Array[1].Next}");
-                        Runtime.Logger.WriteLine($"   [2] = {this.Array[2]} | next = {this.Array[2].Next}");
-                        Runtime.Logger.WriteLine($"");
-                        return head;
                     }
                     else
                     {
                         Task.ExploreContextSwitch();
-                        using (await this.ArrayLock.AcquireAsync())
-                        {
-                            this.Array[head].Next = next;
-                            Runtime.Monitor<StateMonitor>(new StateMonitor.UpdateStateEvent(this.Array));
-                        }
                     }
                 }
 

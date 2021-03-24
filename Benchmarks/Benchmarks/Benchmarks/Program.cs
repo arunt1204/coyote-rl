@@ -1,4 +1,5 @@
-﻿using Microsoft.Coyote.Actors;
+﻿using Microsoft.Coyote;
+using Microsoft.Coyote.Actors;
 using Microsoft.Coyote.Tasks;
 using System;
 using System.Collections.Generic;
@@ -8,8 +9,9 @@ namespace Benchmarks
     public class Program
     {
         public static void Main(string[] args)
-        {
-            Console.WriteLine("Hello World!");
+        {            
+            Console.ReadLine();
+            Console.WriteLine("User cancelled the test by pressing ENTER");
         }
 
         [Microsoft.Coyote.SystematicTesting.Test]
